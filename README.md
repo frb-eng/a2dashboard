@@ -122,6 +122,18 @@ flowchart TB
 - **Portable** — the same JSON can be rendered by any client that implements a2UI; the server doesn't care which.
 - **Inspectable** — every panel is traceable back to an endpoint, a query, and an aggregation.
 
+## MVP scope
+
+The current implementation is deliberately narrow — just enough surface area to validate the three-layer model end-to-end. Everything else (charts, KPIs, aggregations, more endpoints, alternative renderers) lands as a named extension to this MVP, not by quietly widening it.
+
+- **UI:** `table` only, rendered with React + MUI.
+- **Aggregation:** none — bindings map endpoint response rows directly to table columns.
+- **Endpoint catalog:** two Strava endpoints, both authenticated with an OAuth2 bearer token:
+  - `GET /athlete/activities` — paginated list of the athlete's recent activities (`before`, `after`, `page`, `per_page`).
+  - `GET /segments/starred` — paginated list of the athlete's starred segments (`page`, `per_page`).
+
+In practice, an MVP dashboard JSON looks like a `table` UI node whose columns are bound to fields from one of those two endpoints, with pagination as the only data-side behavior.
+
 ## Status
 
 Early prototype. The endpoint catalog is currently hardcoded — a future iteration will let users register their own REST APIs (OpenAPI ingest) so the catalog becomes per-tenant.
