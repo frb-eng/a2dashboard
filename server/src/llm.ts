@@ -61,7 +61,10 @@ type IntermediateDirection = (typeof DIRECTION_VALUES)[number];
 interface IntermediateTableColumn {
   id: string;
   header: string;
-  field: string;
+  /** Dotted path into the row, used when `cellId` is null. */
+  field: string | null;
+  /** Optional id of a component (in `componentEntries`) rendered inside each cell. */
+  cellId: string | null;
 }
 
 interface IntermediateTableComponent {
@@ -118,13 +121,75 @@ interface IntermediateTabsComponent {
   tabs: IntermediateTabsTab[];
 }
 
+const TEXT_VARIANT_VALUES = [
+  "h1",
+  "h2",
+  "h3",
+  "h4",
+  "h5",
+  "caption",
+  "body",
+] as const;
+type IntermediateTextVariant = (typeof TEXT_VARIANT_VALUES)[number];
+
+interface IntermediateTextComponent {
+  type: "text";
+  id: string;
+  text: string | null;
+  field: string | null;
+  variant: IntermediateTextVariant | null;
+}
+
+const ICON_NAME_VALUES = [
+  "accountCircle",
+  "add",
+  "arrowBack",
+  "arrowForward",
+  "calendarToday",
+  "check",
+  "close",
+  "delete",
+  "download",
+  "edit",
+  "error",
+  "favorite",
+  "folder",
+  "help",
+  "home",
+  "info",
+  "lock",
+  "lockOpen",
+  "mail",
+  "menu",
+  "person",
+  "refresh",
+  "search",
+  "send",
+  "settings",
+  "share",
+  "star",
+  "upload",
+  "visibility",
+  "visibilityOff",
+  "warning",
+] as const;
+type IntermediateIconName = (typeof ICON_NAME_VALUES)[number];
+
+interface IntermediateIconComponent {
+  type: "icon";
+  id: string;
+  name: IntermediateIconName;
+}
+
 type IntermediateComponent =
   | IntermediateTableComponent
   | IntermediateRowComponent
   | IntermediateColumnComponent
   | IntermediateListComponent
   | IntermediateCardComponent
-  | IntermediateTabsComponent;
+  | IntermediateTabsComponent
+  | IntermediateTextComponent
+  | IntermediateIconComponent;
 
 interface IntermediateBinding {
   type: "rows";
@@ -180,11 +245,12 @@ function tableComponentSchema(): Record<string, unknown> {
         items: {
           type: "object",
           additionalProperties: false,
-          required: ["id", "header", "field"],
+          required: ["id", "header", "field", "cellId"],
           properties: {
             id: { type: "string" },
             header: { type: "string" },
-            field: { type: "string" },
+            field: { type: ["string", "null"] },
+            cellId: { type: ["string", "null"] },
           },
         },
       },
@@ -263,6 +329,34 @@ function tabsComponentSchema(): Record<string, unknown> {
   };
 }
 
+function textComponentSchema(): Record<string, unknown> {
+  return {
+    type: "object",
+    additionalProperties: false,
+    required: ["type", "id", "text", "field", "variant"],
+    properties: {
+      type: { type: "string", enum: ["text"] },
+      id: { type: "string" },
+      text: { type: ["string", "null"] },
+      field: { type: ["string", "null"] },
+      variant: { type: ["string", "null"], enum: [...TEXT_VARIANT_VALUES, null] },
+    },
+  };
+}
+
+function iconComponentSchema(): Record<string, unknown> {
+  return {
+    type: "object",
+    additionalProperties: false,
+    required: ["type", "id", "name"],
+    properties: {
+      type: { type: "string", enum: ["icon"] },
+      id: { type: "string" },
+      name: { type: "string", enum: [...ICON_NAME_VALUES] },
+    },
+  };
+}
+
 function componentSchema(): Record<string, unknown> {
   return {
     anyOf: [
@@ -272,6 +366,8 @@ function componentSchema(): Record<string, unknown> {
       listComponentSchema(),
       cardComponentSchema(),
       tabsComponentSchema(),
+      textComponentSchema(),
+      iconComponentSchema(),
     ],
   };
 }
@@ -438,23 +534,30 @@ THREE-LAYER MODEL (when producing a dashboard)
   1. componentEntries + uiRootId — the UI tree, stored as a flat array of components addressed by id. \`uiRootId\` names the root. Containers reference their children by id (via \`childIds\`, \`childId\`, or \`tabs[].childId\`).
 
      UI primitives:
-       - \`table\`  — data-producing leaf. Fields: \`rows\` (binding id), \`columns\` (array of { id, header, field }), optional \`title\`.
+       - \`table\`  — data-producing container. Fields: \`rows\` (binding id), \`columns\`, optional \`title\`.
+                     Each column is { id, header, field, cellId }. Set EXACTLY ONE of \`field\` or \`cellId\` per column (the other must be null):
+                         * \`field\` (dotted path into the row) — render the value directly as text.
+                         * \`cellId\` (id of any component) — render that component inside every cell. Inside the cell, descendant \`text\` nodes resolve their \`field\` against the row.
        - \`row\`    — horizontal flex container. Fields: \`childIds\` (component ids), optional \`title\`, \`justify\`, \`align\`.
        - \`column\` — vertical flex container. Fields: \`childIds\` (component ids), optional \`title\`, \`justify\`, \`align\`.
        - \`list\`   — uniform layout container. Fields: \`childIds\` (component ids), optional \`title\`, \`direction\` ("vertical" | "horizontal"), \`align\`.
        - \`card\`   — bordered, elevated single-child container. Fields: \`childId\` (one component id), optional \`title\`. To put multiple things in a card, wrap them in a \`column\`/\`row\`/\`list\` and use that container's id as \`childId\`.
        - \`tabs\`   — tabbed switcher. Fields: \`tabs\` (array of { title, childId } with at least one entry), optional \`title\`. The first tab is active on mount.
+       - \`text\`   — display leaf. Fields: \`text\` (literal string), \`field\` (dotted path resolved against the surrounding row context), \`variant\`. Set EXACTLY ONE of \`text\` or \`field\` (the other null); \`field\` only resolves when the text sits inside a table column's \`cellId\` subtree.
+       - \`icon\`   — display leaf. Field: \`name\` from a fixed enum.
 
-     justify ∈ ${JUSTIFY_VALUES.map((v) => `"${v}"`).join(" | ")}.
-     align   ∈ ${ALIGN_VALUES.map((v) => `"${v}"`).join(" | ")}.
+     justify  ∈ ${JUSTIFY_VALUES.map((v) => `"${v}"`).join(" | ")}.
+     align    ∈ ${ALIGN_VALUES.map((v) => `"${v}"`).join(" | ")}.
      direction ∈ ${DIRECTION_VALUES.map((v) => `"${v}"`).join(" | ")}.
+     variant  ∈ ${TEXT_VARIANT_VALUES.map((v) => `"${v}"`).join(" | ")}.
+     icon name ∈ ${ICON_NAME_VALUES.map((v) => `"${v}"`).join(" | ")}.
 
   2. dataEntries — bindings that name how rows are produced. MVP: only \`rows\` bindings that pass an endpoint response through unchanged.
   3. endpointEntries — concrete invocations of catalogued endpoints (id + params + refresh).
 
 Cross-layer references use string ids:
   - uiRootId must equal some componentEntries[*].id
-  - childIds[*], childId, and tabs[*].childId must each equal some componentEntries[*].id
+  - childIds[*], childId, tabs[*].childId, and columns[*].cellId must each equal some componentEntries[*].id (when not null)
   - table.rows must equal some dataEntries[*].id
   - dataEntries[*].binding.endpoint must equal some endpointEntries[*].id
   - endpointEntries[*].call.endpointId must equal a catalogued endpoint id
@@ -468,6 +571,8 @@ GUIDANCE
   - When you do use a container, give every component a distinct id and reference children by id.
   - \`card\` accepts a single \`childId\`. To put several things in a card, wrap them in a \`column\`/\`row\`/\`list\` and point \`childId\` at that container.
   - \`tabs\` must have at least one entry. Each tab is a { title, childId } pair; the child is whatever component should appear when the tab is active.
+  - Use \`text\` for headings and standalone labels in a layout. For plain tabular data, prefer a plain \`field\` column over a \`text\` cell — the cell-component path is for when you actually need composition (icon + value, badge, etc.).
+  - When composing a custom cell, put a \`row\` (for icon+text) or \`column\` (for stacked lines) at \`cellId\` and reference \`text\` / \`icon\` leaves from there. \`text\` inside a cell uses \`field\` to read the row.
   - For tables: pick 4–7 useful columns. Column \`field\` is a dotted path into the row object (e.g. "owner.login").
   - Use null for title, justify, align, direction, rowsPath when not needed; the catalogued endpoints return arrays at the top level so rowsPath is usually null.
   - Default refresh.kind to "on-mount".
@@ -516,7 +621,14 @@ function buildUITree(
           id: c.id,
           ...(c.title ? { title: c.title } : {}),
           rows: c.rows,
-          columns: c.columns,
+          columns: c.columns.map((col) => ({
+            id: col.id,
+            header: col.header,
+            ...(col.field ? { field: col.field } : {}),
+            ...(col.cellId
+              ? { cell: buildUITree(col.cellId, byId, visiting) }
+              : {}),
+          })),
         };
       case "row":
         return {
@@ -561,6 +673,20 @@ function buildUITree(
             title: t.title,
             child: buildUITree(t.childId, byId, visiting),
           })),
+        };
+      case "text":
+        return {
+          type: "text",
+          id: c.id,
+          ...(c.text ? { text: c.text } : {}),
+          ...(c.field ? { field: c.field } : {}),
+          ...(c.variant ? { variant: c.variant } : {}),
+        };
+      case "icon":
+        return {
+          type: "icon",
+          id: c.id,
+          name: c.name,
         };
     }
   } finally {

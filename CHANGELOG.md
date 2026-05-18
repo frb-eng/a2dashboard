@@ -19,12 +19,24 @@ release notes per tag.
   titled child views) — also lifted from a2ui's basic catalog. `card`
   takes one `childId`; `tabs` takes `tabs: [{ title, childId }]` and
   defaults to the first tab on mount.
+- **Display leaves.** Two more a2ui-aligned primitives — `text` (with
+  a typography `variant` ∈ h1…h5 / caption / body, mapped onto MUI's
+  Typography) and `icon` (a curated `name` enum mapped onto
+  `@mui/icons-material` components).
+- **Recursive table cells.** Each `TableColumn` now carries either a
+  `field` path (the existing behavior) or a nested `cell` UI node. When
+  `cell` is set, the renderer wraps the cell subtree in a
+  `RowContext.Provider` so descendant `text` leaves can resolve their
+  `field` against the current row. Closes the a2UI recursion loop: any
+  UI node can live inside any cell.
 - **Flat-components intermediate.** The LLM now emits the UI tree as a
   flat `componentEntries[] + uiRootId` form (children referenced by
-  `childIds`, `childId`, or `tabs[].childId`) to dodge recursive-schema
-  limits in OpenAI strict mode. The server resolves it into the
-  renderer-friendly `ui: UINode` tree with inline children, with cycle
-  and dangling-reference checks.
+  `childIds`, `childId`, `tabs[].childId`, or column `cellId`) to dodge
+  recursive-schema limits in OpenAI strict mode. The server resolves it
+  into the renderer-friendly `ui: UINode` tree with inline children,
+  with cycle and dangling-reference checks. Shared sub-trees (e.g. one
+  cell component reused across columns) resolve independently and do
+  not trip cycle detection.
 
 ## v0.0.1 — Conversational, multi-session iteration (2026-05-18)
 

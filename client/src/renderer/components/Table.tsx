@@ -1,11 +1,18 @@
 /**
- * Table renderer — the MVP's only UI primitive.
+ * Table renderer.
  *
- * Resolves the bound `rows` binding, applies each column's dotted-path
- * `field` to every row, and renders a MUI table. Cell values are
- * formatted for display only — no transformation logic lives here; if a
- * derived value is needed, that's a signal to add an aggregation
- * primitive, not to inline logic in the renderer.
+ * Resolves the bound `rows` binding, then renders each column according
+ * to its shape:
+ *   - When a column declares a nested `cell` UI node, every cell renders
+ *     that node inside a `<RowContext.Provider>` so descendant `text`
+ *     leaves can read the row via their `field`. This is the a2UI
+ *     recursive composition story applied to table cells.
+ *   - Otherwise the column's `field` (dotted path) is applied to the row
+ *     and the value is formatted for display.
+ *
+ * No transformation logic lives here; if a derived value is needed,
+ * that's a signal to add an aggregation primitive, not to inline logic
+ * in the renderer.
  */
 
 import Alert from "@mui/material/Alert";
@@ -25,10 +32,11 @@ import Tooltip from "@mui/material/Tooltip";
 import Typography from "@mui/material/Typography";
 import RefreshIcon from "@mui/icons-material/Refresh";
 
-import type { NodeRendererProps } from "../registry";
+import { NodeRenderer, type NodeRendererProps } from "../registry";
 import type { TableNode } from "../../spec";
 import { useRows } from "../useRows";
 import { readPath } from "../data";
+import { RowContext } from "../RowContext";
 
 function formatCell(value: unknown): React.ReactNode {
   if (value == null) {
@@ -111,7 +119,15 @@ export function TableRenderer({ node, dashboard }: NodeRendererProps<TableNode>)
               <TableRow key={i} hover>
                 {node.columns.map((col) => (
                   <TableCell key={col.id}>
-                    {formatCell(readPath(row, col.field))}
+                    {col.cell ? (
+                      <RowContext.Provider value={row}>
+                        <NodeRenderer node={col.cell} dashboard={dashboard} />
+                      </RowContext.Provider>
+                    ) : col.field ? (
+                      formatCell(readPath(row, col.field))
+                    ) : (
+                      <Typography variant="body2" color="text.disabled">—</Typography>
+                    )}
                   </TableCell>
                 ))}
               </TableRow>

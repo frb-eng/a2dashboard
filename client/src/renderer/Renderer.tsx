@@ -16,6 +16,8 @@ import { ColumnRenderer } from "./components/Column";
 import { ListRenderer } from "./components/List";
 import { CardRenderer } from "./components/Card";
 import { TabsRenderer } from "./components/Tabs";
+import { TextRenderer } from "./components/Text";
+import { IconRenderer } from "./components/Icon";
 
 register("table", TableRenderer);
 register("row", RowRenderer);
@@ -23,6 +25,8 @@ register("column", ColumnRenderer);
 register("list", ListRenderer);
 register("card", CardRenderer);
 register("tabs", TabsRenderer);
+register("text", TextRenderer);
+register("icon", IconRenderer);
 
 interface RendererProps {
   dashboard: Dashboard;
