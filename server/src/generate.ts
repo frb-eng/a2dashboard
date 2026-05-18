@@ -1,14 +1,13 @@
 /**
- * Dashboard generator.
+ * Dashboard generator orchestrator.
  *
- * MVP: the real LLM call is deferred. This module returns a hand-crafted
- * Dashboard JSON that satisfies the spec types and exercises both
- * catalogued endpoints depending on a keyword in the prompt. The shape is
- * what the LLM will eventually produce — so the client can be built and
- * iterated against the same contract.
+ * Routes to OpenAI when OPENAI_API_KEY is configured; otherwise returns
+ * a deterministic stub so the rest of the stack stays usable in
+ * environments without an API key.
  */
 
 import type { Dashboard } from "./spec/dashboard.js";
+import { generateDashboardViaLLM, isLLMConfigured, MODEL } from "./llm.js";
 
 export interface GenerateRequest {
   prompt: string;
@@ -18,8 +17,10 @@ export interface GenerateResponse {
   dashboard: Dashboard;
   /** Echoed back so the client can show what was interpreted. */
   prompt: string;
-  /** True while the LLM is stubbed; clients can show a banner. */
-  stubbed: true;
+  /** True when no LLM is wired up and a hardcoded stub was returned. */
+  stubbed: boolean;
+  /** Model name when the LLM was used; null when stubbed. */
+  model: string | null;
 }
 
 function userReposDashboard(username: string): Dashboard {
@@ -84,31 +85,33 @@ function repoIssuesDashboard(owner: string, repo: string): Dashboard {
   };
 }
 
-/**
- * Pick a stub dashboard based on simple keyword matching. Real LLM
- * integration will replace this function; the response shape will not
- * change.
- */
-export function generateDashboard(req: GenerateRequest): GenerateResponse {
-  const prompt = req.prompt.trim();
+function stubDashboard(prompt: string): Dashboard {
   const lower = prompt.toLowerCase();
-
   const ownerRepoMatch = prompt.match(/([A-Za-z0-9._-]+)\/([A-Za-z0-9._-]+)/);
   const owner = ownerRepoMatch?.[1];
   const repo = ownerRepoMatch?.[2];
   if (lower.includes("issue") && owner && repo) {
-    return {
-      dashboard: repoIssuesDashboard(owner, repo),
-      prompt,
-      stubbed: true,
-    };
+    return repoIssuesDashboard(owner, repo);
   }
-
   const userMatch = prompt.match(/@([A-Za-z0-9-]+)/);
   const username = userMatch?.[1] ?? "anthropics";
+  return userReposDashboard(username);
+}
+
+export async function generateDashboard(
+  req: GenerateRequest,
+): Promise<GenerateResponse> {
+  const prompt = req.prompt.trim();
+
+  if (isLLMConfigured()) {
+    const dashboard = await generateDashboardViaLLM(prompt);
+    return { dashboard, prompt, stubbed: false, model: MODEL };
+  }
+
   return {
-    dashboard: userReposDashboard(username),
+    dashboard: stubDashboard(prompt),
     prompt,
     stubbed: true,
+    model: null,
   };
 }
