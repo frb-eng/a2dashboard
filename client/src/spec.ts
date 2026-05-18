@@ -61,7 +61,32 @@ export interface ListNode {
   align?: LayoutAlign;
 }
 
-export type UINode = TableNode | RowNode | ColumnNode | ListNode;
+export interface CardNode {
+  type: "card";
+  id: string;
+  title?: string;
+  child: UINode;
+}
+
+export interface TabsTab {
+  title: string;
+  child: UINode;
+}
+
+export interface TabsNode {
+  type: "tabs";
+  id: string;
+  title?: string;
+  tabs: TabsTab[];
+}
+
+export type UINode =
+  | TableNode
+  | RowNode
+  | ColumnNode
+  | ListNode
+  | CardNode
+  | TabsNode;
 
 export interface RowsBinding {
   type: "rows";

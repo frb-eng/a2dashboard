@@ -14,11 +14,15 @@ import { TableRenderer } from "./components/Table";
 import { RowRenderer } from "./components/Row";
 import { ColumnRenderer } from "./components/Column";
 import { ListRenderer } from "./components/List";
+import { CardRenderer } from "./components/Card";
+import { TabsRenderer } from "./components/Tabs";
 
 register("table", TableRenderer);
 register("row", RowRenderer);
 register("column", ColumnRenderer);
 register("list", ListRenderer);
+register("card", CardRenderer);
+register("tabs", TabsRenderer);
 
 interface RendererProps {
   dashboard: Dashboard;

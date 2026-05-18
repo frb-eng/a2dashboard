@@ -14,11 +14,17 @@ release notes per tag.
   `align` / `direction` vocabulary mirrors Google's a2ui basic catalog,
   and the React renderer reuses the same component-registry pattern
   found in the a2ui React renderer.
+- **Grouping containers.** Two more primitives — `card` (bordered,
+  elevated single-child wrapper) and `tabs` (switcher between several
+  titled child views) — also lifted from a2ui's basic catalog. `card`
+  takes one `childId`; `tabs` takes `tabs: [{ title, childId }]` and
+  defaults to the first tab on mount.
 - **Flat-components intermediate.** The LLM now emits the UI tree as a
-  flat `componentEntries[] + uiRootId` form (children referenced by id)
-  to dodge recursive-schema limits in OpenAI strict mode. The server
-  resolves it into the renderer-friendly `ui: UINode` tree with inline
-  `children: UINode[]`, with cycle and dangling-reference checks.
+  flat `componentEntries[] + uiRootId` form (children referenced by
+  `childIds`, `childId`, or `tabs[].childId`) to dodge recursive-schema
+  limits in OpenAI strict mode. The server resolves it into the
+  renderer-friendly `ui: UINode` tree with inline children, with cycle
+  and dangling-reference checks.
 
 ## v0.0.1 — Conversational, multi-session iteration (2026-05-18)
 

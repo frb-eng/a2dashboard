@@ -6,14 +6,16 @@
  *   - `row`     — horizontal flex layout container.
  *   - `column`  — vertical flex layout container.
  *   - `list`    — uniform flex layout with a configurable axis.
+ *   - `card`    — bordered/elevated single-child container with optional title.
+ *   - `tabs`    — switcher between several titled child views.
  *
  * The renderer executes only what is named here, and the LLM is told only
  * what is named here — these two stay in lockstep.
  *
- * Layout containers hold their children inline (`children: UINode[]`).
- * The LLM-facing intermediate format uses a flat components-by-id map
- * instead (see `server/src/llm.ts`); the server resolves it into this
- * tree before returning the dashboard.
+ * Containers hold their children inline (`children`, `child`, or
+ * `tabs[].child` as a `UINode`). The LLM-facing intermediate format uses
+ * a flat components-by-id map instead (see `server/src/llm.ts`); the
+ * server resolves it into this tree before returning the dashboard.
  */
 
 /** Where to position children along a flex axis. Mirrors a2ui's basic catalog. */
@@ -80,5 +82,39 @@ export interface ListNode {
   align?: LayoutAlign;
 }
 
+export interface CardNode {
+  type: "card";
+  id: string;
+  /**
+   * Optional heading rendered at the top of the card. Distinct from the
+   * card's child content, which is always exactly one node — wrap multiple
+   * elements in a `column`/`row`/`list` to nest them inside a card.
+   */
+  title?: string;
+  child: UINode;
+}
+
+export interface TabsTab {
+  /** Label shown in the tab strip. */
+  title: string;
+  /** The single UI node displayed when this tab is active. */
+  child: UINode;
+}
+
+export interface TabsNode {
+  type: "tabs";
+  id: string;
+  /** Optional heading rendered above the tab strip. */
+  title?: string;
+  /** At least one tab. The first tab is active on mount. */
+  tabs: TabsTab[];
+}
+
 /** Discriminated union over every UI primitive. */
-export type UINode = TableNode | RowNode | ColumnNode | ListNode;
+export type UINode =
+  | TableNode
+  | RowNode
+  | ColumnNode
+  | ListNode
+  | CardNode
+  | TabsNode;

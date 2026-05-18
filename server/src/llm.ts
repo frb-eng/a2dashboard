@@ -99,11 +99,32 @@ interface IntermediateListComponent {
   align: IntermediateAlign | null;
 }
 
+interface IntermediateCardComponent {
+  type: "card";
+  id: string;
+  title: string | null;
+  childId: string;
+}
+
+interface IntermediateTabsTab {
+  title: string;
+  childId: string;
+}
+
+interface IntermediateTabsComponent {
+  type: "tabs";
+  id: string;
+  title: string | null;
+  tabs: IntermediateTabsTab[];
+}
+
 type IntermediateComponent =
   | IntermediateTableComponent
   | IntermediateRowComponent
   | IntermediateColumnComponent
-  | IntermediateListComponent;
+  | IntermediateListComponent
+  | IntermediateCardComponent
+  | IntermediateTabsComponent;
 
 interface IntermediateBinding {
   type: "rows";
@@ -203,6 +224,45 @@ function listComponentSchema(): Record<string, unknown> {
   };
 }
 
+function cardComponentSchema(): Record<string, unknown> {
+  return {
+    type: "object",
+    additionalProperties: false,
+    required: ["type", "id", "title", "childId"],
+    properties: {
+      type: { type: "string", enum: ["card"] },
+      id: { type: "string" },
+      title: { type: ["string", "null"] },
+      childId: { type: "string" },
+    },
+  };
+}
+
+function tabsComponentSchema(): Record<string, unknown> {
+  return {
+    type: "object",
+    additionalProperties: false,
+    required: ["type", "id", "title", "tabs"],
+    properties: {
+      type: { type: "string", enum: ["tabs"] },
+      id: { type: "string" },
+      title: { type: ["string", "null"] },
+      tabs: {
+        type: "array",
+        items: {
+          type: "object",
+          additionalProperties: false,
+          required: ["title", "childId"],
+          properties: {
+            title: { type: "string" },
+            childId: { type: "string" },
+          },
+        },
+      },
+    },
+  };
+}
+
 function componentSchema(): Record<string, unknown> {
   return {
     anyOf: [
@@ -210,6 +270,8 @@ function componentSchema(): Record<string, unknown> {
       flexComponentSchema("row"),
       flexComponentSchema("column"),
       listComponentSchema(),
+      cardComponentSchema(),
+      tabsComponentSchema(),
     ],
   };
 }
@@ -373,13 +435,15 @@ WHEN TO RETURN dashboard: null
   - Never invent endpoints, primitives, or fields not listed below to "make it work". Refuse and explain.
 
 THREE-LAYER MODEL (when producing a dashboard)
-  1. componentEntries + uiRootId — the UI tree, stored as a flat array of components addressed by id. \`uiRootId\` names the root. Layout containers reference their children by id via \`childIds\`.
+  1. componentEntries + uiRootId — the UI tree, stored as a flat array of components addressed by id. \`uiRootId\` names the root. Containers reference their children by id (via \`childIds\`, \`childId\`, or \`tabs[].childId\`).
 
      UI primitives:
        - \`table\`  — data-producing leaf. Fields: \`rows\` (binding id), \`columns\` (array of { id, header, field }), optional \`title\`.
        - \`row\`    — horizontal flex container. Fields: \`childIds\` (component ids), optional \`title\`, \`justify\`, \`align\`.
        - \`column\` — vertical flex container. Fields: \`childIds\` (component ids), optional \`title\`, \`justify\`, \`align\`.
        - \`list\`   — uniform layout container. Fields: \`childIds\` (component ids), optional \`title\`, \`direction\` ("vertical" | "horizontal"), \`align\`.
+       - \`card\`   — bordered, elevated single-child container. Fields: \`childId\` (one component id), optional \`title\`. To put multiple things in a card, wrap them in a \`column\`/\`row\`/\`list\` and use that container's id as \`childId\`.
+       - \`tabs\`   — tabbed switcher. Fields: \`tabs\` (array of { title, childId } with at least one entry), optional \`title\`. The first tab is active on mount.
 
      justify ∈ ${JUSTIFY_VALUES.map((v) => `"${v}"`).join(" | ")}.
      align   ∈ ${ALIGN_VALUES.map((v) => `"${v}"`).join(" | ")}.
@@ -390,7 +454,7 @@ THREE-LAYER MODEL (when producing a dashboard)
 
 Cross-layer references use string ids:
   - uiRootId must equal some componentEntries[*].id
-  - layout childIds[*] must each equal some componentEntries[*].id
+  - childIds[*], childId, and tabs[*].childId must each equal some componentEntries[*].id
   - table.rows must equal some dataEntries[*].id
   - dataEntries[*].binding.endpoint must equal some endpointEntries[*].id
   - endpointEntries[*].call.endpointId must equal a catalogued endpoint id
@@ -400,8 +464,10 @@ ENDPOINT CATALOG (the only endpoints you may use):
 ${catalogForPrompt()}
 
 GUIDANCE
-  - Prefer a single \`table\` at the root when one is enough. Reach for layout containers (\`row\`, \`column\`, \`list\`) only when the user actually asks for multiple panels side-by-side or stacked.
-  - When you do use a layout container, give every component a distinct id and reference children by id.
+  - Prefer a single \`table\` at the root when one is enough. Reach for containers (\`row\`, \`column\`, \`list\`, \`card\`, \`tabs\`) only when the user actually asks for multiple panels, grouped sections, or switchable views.
+  - When you do use a container, give every component a distinct id and reference children by id.
+  - \`card\` accepts a single \`childId\`. To put several things in a card, wrap them in a \`column\`/\`row\`/\`list\` and point \`childId\` at that container.
+  - \`tabs\` must have at least one entry. Each tab is a { title, childId } pair; the child is whatever component should appear when the tab is active.
   - For tables: pick 4–7 useful columns. Column \`field\` is a dotted path into the row object (e.g. "owner.login").
   - Use null for title, justify, align, direction, rowsPath when not needed; the catalogued endpoints return arrays at the top level so rowsPath is usually null.
   - Default refresh.kind to "on-mount".
@@ -478,6 +544,23 @@ function buildUITree(
           children: c.childIds.map((cid) => buildUITree(cid, byId, visiting)),
           ...(c.direction ? { direction: c.direction } : {}),
           ...(c.align ? { align: c.align } : {}),
+        };
+      case "card":
+        return {
+          type: "card",
+          id: c.id,
+          ...(c.title ? { title: c.title } : {}),
+          child: buildUITree(c.childId, byId, visiting),
+        };
+      case "tabs":
+        return {
+          type: "tabs",
+          id: c.id,
+          ...(c.title ? { title: c.title } : {}),
+          tabs: c.tabs.map((t) => ({
+            title: t.title,
+            child: buildUITree(t.childId, byId, visiting),
+          })),
         };
     }
   } finally {
