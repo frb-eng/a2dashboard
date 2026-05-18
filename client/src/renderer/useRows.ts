@@ -1,0 +1,69 @@
+/**
+ * React hook that resolves a row-producing binding into an array of rows.
+ *
+ * Honors the endpoint call's refresh policy: MVP supports `on-mount`
+ * (fetch once) and `manual` (returns a `refresh` function the UI can
+ * wire up). No background polling — that lands when a real use case
+ * demands it.
+ */
+
+import { useCallback, useEffect, useState } from "react";
+import type { Binding, Dashboard, EndpointCall } from "../spec";
+import { fetchRows, loadCatalog } from "./data";
+
+export interface RowsState {
+  rows: Record<string, unknown>[] | null;
+  loading: boolean;
+  error: string | null;
+  refresh: () => void;
+}
+
+export function useRows(
+  binding: Binding | undefined,
+  dashboard: Dashboard,
+): RowsState {
+  const [rows, setRows] = useState<Record<string, unknown>[] | null>(null);
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [tick, setTick] = useState(0);
+
+  const refresh = useCallback(() => setTick((t) => t + 1), []);
+
+  const call: EndpointCall | undefined = binding
+    ? dashboard.endpoints[binding.endpoint]
+    : undefined;
+  const policy = call?.refresh.kind ?? "on-mount";
+
+  useEffect(() => {
+    if (!binding) return;
+    let cancelled = false;
+    setLoading(true);
+    setError(null);
+
+    (async () => {
+      try {
+        const catalog = await loadCatalog();
+        const result = await fetchRows(binding, dashboard, catalog);
+        if (!cancelled) setRows(result);
+      } catch (e) {
+        if (!cancelled) setError(e instanceof Error ? e.message : String(e));
+      } finally {
+        if (!cancelled) setLoading(false);
+      }
+    })();
+
+    return () => {
+      cancelled = true;
+    };
+    // `tick` drives manual refresh; the binding/dashboard identity changes
+    // when a new dashboard is generated.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [binding, dashboard, tick]);
+
+  // `policy` is currently informational — `on-mount` is implicit in the
+  // effect above and `manual` is honored by exposing `refresh`. Surfaced
+  // here so the caller can decide whether to render a refresh control.
+  void policy;
+
+  return { rows, loading, error, refresh };
+}

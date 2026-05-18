@@ -1,13 +1,13 @@
 /**
  * Thin client for the a2dashboard server.
  *
- * The client does not yet model the Dashboard JSON — for the MVP we
- * simply display it. The server owns the schema; when the renderer is
- * added it will import shared types instead of duplicating them here.
+ * The Dashboard type mirrors the server contract; see `spec.ts`.
  */
 
+import type { Dashboard } from "./spec";
+
 export interface GenerateResponse {
-  dashboard: unknown;
+  dashboard: Dashboard;
   prompt: string;
   model: string;
 }
