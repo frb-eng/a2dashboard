@@ -67,23 +67,32 @@ interface IntermediateCall {
 interface IntermediateDashboard {
   version: "0.1";
   title: string;
-  /** One-or-two sentence description of what this turn produced or changed. Shown as the assistant's chat reply. */
-  summary: string;
   ui: IntermediateUI;
   dataEntries: { id: string; binding: IntermediateBinding }[];
   endpointEntries: { id: string; call: IntermediateCall }[];
 }
 
-function dashboardSchema(): Record<string, unknown> {
+interface IntermediateResponse {
+  /** Always present — the assistant's chat reply, shown verbatim to the user. */
+  reply: string;
+  /**
+   * The dashboard spec for this turn, or null when the model declined to
+   * produce one (e.g. the request was ambiguous, off-topic, or required
+   * primitives or endpoints not in the catalog). When null, the previous
+   * dashboard remains in place.
+   */
+  dashboard: IntermediateDashboard | null;
+}
+
+function dashboardObjectSchema(): Record<string, unknown> {
   const endpointIds = githubCatalog.map((e) => e.id);
   return {
     type: "object",
     additionalProperties: false,
-    required: ["version", "title", "summary", "ui", "dataEntries", "endpointEntries"],
+    required: ["version", "title", "ui", "dataEntries", "endpointEntries"],
     properties: {
       version: { type: "string", enum: ["0.1"] },
       title: { type: "string" },
-      summary: { type: "string" },
       ui: {
         type: "object",
         additionalProperties: false,
@@ -172,6 +181,20 @@ function dashboardSchema(): Record<string, unknown> {
   };
 }
 
+function responseSchema(): Record<string, unknown> {
+  return {
+    type: "object",
+    additionalProperties: false,
+    required: ["reply", "dashboard"],
+    properties: {
+      reply: { type: "string" },
+      dashboard: {
+        anyOf: [{ type: "null" }, dashboardObjectSchema()],
+      },
+    },
+  };
+}
+
 function catalogForPrompt(): string {
   return githubCatalog
     .map((e) => {
@@ -200,15 +223,30 @@ function systemPrompt(current: Dashboard | null): string {
 YOU ARE ITERATING ON AN EXISTING DASHBOARD. The current spec is shown below. Treat the latest user message as a refinement and PATCH this spec — do not rewrite from scratch.
   - Preserve existing ids (ui node id, column ids, dataEntries[*].id, endpointEntries[*].id) whenever the underlying concept is unchanged. Stable ids let the user's mental model survive iteration.
   - Only change the parts the user actually asked to change. Leave everything else identical.
-  - If the user asks something ambiguous, make a reasonable choice and proceed — do not ask follow-up questions.
 
 CURRENT DASHBOARD JSON:
 ${JSON.stringify(current, null, 2)}`
     : "";
 
-  return `You are a2dashboard's spec generator. Convert the user's plain-language description into a Dashboard JSON document.
+  return `You are a2dashboard's assistant. You hold a conversation with the user about a single dashboard and reply with a JSON object: a chat \`reply\` (always) plus a \`dashboard\` spec (or null).
 
-THREE-LAYER MODEL (kept separable on purpose):
+RESPONSE SHAPE
+  - \`reply\`: 1–3 short sentences shown to the user as your chat message. Be conversational and direct.
+  - \`dashboard\`: the new spec for this turn, or null if you couldn't or shouldn't change the dashboard.
+
+WHEN TO PRODUCE A DASHBOARD (dashboard != null)
+  - The user described a dashboard, or asked for a change, AND you can serve it using ONLY the primitives and endpoints listed below.
+  - In \`reply\`, briefly describe what you produced or changed ("Showing…", "Added a column for…", "Switched the source to…"). Do not paste JSON into \`reply\`.
+
+WHEN TO RETURN dashboard: null
+  - The request makes no sense, is empty, or is unrelated to building a dashboard (small talk, greetings, off-topic). Reply briefly and offer guidance on what you CAN build.
+  - The request is too ambiguous to act on without guessing wildly. Ask one focused clarifying question in \`reply\`.
+  - The request needs a primitive that does not exist yet (e.g. a chart, KPI tile, map, form, multiple panels in one layout). Name what is missing in plain language ("I can only render a single table right now — charts aren't supported yet.").
+  - The request needs data this server cannot reach (any source other than the catalogued GitHub endpoints below — e.g. Stripe, Strava, internal APIs, file uploads, databases). Name the missing endpoint and what is available.
+  - The user is asking a question about the current dashboard or the system rather than asking for a change. Answer in \`reply\`.
+  - Never invent endpoints, primitives, or fields not listed below to "make it work". Refuse and explain.
+
+THREE-LAYER MODEL (when producing a dashboard)
   1. ui — declarative UI tree. MVP vocabulary: a single \`table\` primitive only.
   2. dataEntries — bindings that name how rows are produced. MVP: only \`rows\` bindings that pass an endpoint response through unchanged.
   3. endpointEntries — concrete invocations of catalogued endpoints (id + params + refresh).
@@ -227,8 +265,7 @@ GUIDANCE
   - Use null for ui.title and binding.rowsPath when not needed; the catalogued endpoints return arrays at the top level so rowsPath is usually null.
   - Default refresh.kind to "on-mount".
   - Only include params that exist in the catalog above. Required path params (e.g. username, owner, repo) must be present.
-  - If the user names a GitHub user or owner/repo, use it verbatim. If unspecified, make a reasonable choice and proceed — do not ask follow-up questions.
-  - Always write a short \`summary\` describing what this turn produced or changed, written in the second person ("Showing…", "Added a column for…", "Switched the source to…"). One or two sentences max.${iteration}`;
+  - If the user names a GitHub user or owner/repo, use it verbatim. If the request is otherwise actionable but a minor detail is unspecified, pick a sensible default and proceed.${iteration}`;
 }
 
 let cachedClient: OpenAI | null = null;
@@ -246,8 +283,9 @@ export function assertLLMConfigured(): void {
 }
 
 export interface LLMResult {
-  dashboard: Dashboard;
-  summary: string;
+  reply: string;
+  /** Null when the model declined to produce or change a dashboard this turn. */
+  dashboard: Dashboard | null;
 }
 
 function toDashboard(i: IntermediateDashboard): Dashboard {
@@ -300,8 +338,8 @@ export async function generateDashboardViaLLM(
     response_format: {
       type: "json_schema",
       json_schema: {
-        name: "dashboard",
-        schema: dashboardSchema(),
+        name: "assistant_response",
+        schema: responseSchema(),
         strict: true,
       },
     },
@@ -310,6 +348,9 @@ export async function generateDashboardViaLLM(
 
   const content = completion.choices[0]?.message.content;
   if (!content) throw new Error("OpenAI returned an empty completion.");
-  const parsed = JSON.parse(content) as IntermediateDashboard;
-  return { dashboard: toDashboard(parsed), summary: parsed.summary };
+  const parsed = JSON.parse(content) as IntermediateResponse;
+  return {
+    reply: parsed.reply,
+    dashboard: parsed.dashboard ? toDashboard(parsed.dashboard) : null,
+  };
 }

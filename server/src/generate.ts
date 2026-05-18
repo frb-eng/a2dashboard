@@ -2,9 +2,12 @@
  * Dashboard generator orchestrator.
  *
  * Forwards the prompt — plus prior conversation history and an optional
- * current dashboard — to OpenAI and returns the parsed Dashboard along
- * with a short summary the client uses as the assistant's chat reply.
- * The LLM is required — there is no stub path.
+ * current dashboard — to OpenAI and returns the assistant's chat reply
+ * along with a (possibly null) new dashboard spec. A null dashboard
+ * means the model declined to change anything this turn — typically
+ * because the request was unclear, off-topic, or needed primitives or
+ * endpoints that don't exist yet. The LLM is required — there is no
+ * stub path.
  */
 
 import type { Dashboard } from "./spec/dashboard.js";
@@ -17,12 +20,13 @@ export interface GenerateRequest {
 }
 
 export interface GenerateResponse {
-  dashboard: Dashboard;
-  /** Short LLM-written description of this turn. Shown as the assistant message. */
-  summary: string;
+  /** Always present: the assistant's chat reply. */
+  reply: string;
+  /** Null when no dashboard was produced or changed this turn. */
+  dashboard: Dashboard | null;
   /** Echoed back so the client can show what was interpreted. */
   prompt: string;
-  /** Model that produced the dashboard. */
+  /** Model that produced the response. */
   model: string;
 }
 
@@ -30,10 +34,10 @@ export async function generateDashboard(
   req: GenerateRequest,
 ): Promise<GenerateResponse> {
   const prompt = req.prompt.trim();
-  const { dashboard, summary } = await generateDashboardViaLLM(
+  const { dashboard, reply } = await generateDashboardViaLLM(
     prompt,
     req.history ?? [],
     req.current ?? null,
   );
-  return { dashboard, summary, prompt, model: MODEL };
+  return { dashboard, reply, prompt, model: MODEL };
 }

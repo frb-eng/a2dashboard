@@ -18,8 +18,10 @@ export interface GenerateRequest {
 }
 
 export interface GenerateResponse {
-  dashboard: Dashboard;
-  summary: string;
+  /** Always present: the assistant's chat reply. */
+  reply: string;
+  /** Null when no dashboard was produced or changed this turn. */
+  dashboard: Dashboard | null;
   prompt: string;
   model: string;
 }

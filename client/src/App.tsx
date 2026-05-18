@@ -101,21 +101,25 @@ export default function App() {
 
     try {
       const out = await generate({ prompt, history, current });
-      updateSession(sessionId, (s) => ({
-        ...s,
-        dashboard: out.dashboard,
-        model: out.model,
-        title:
-          s.title === "New dashboard" || s.messages.length <= 2
+      updateSession(sessionId, (s) => {
+        const nextDashboard = out.dashboard ?? s.dashboard;
+        const nextTitle =
+          out.dashboard && (s.title === "New dashboard" || s.messages.length <= 2)
             ? out.dashboard.title || s.title
-            : s.title,
-        messages: s.messages.map((m) =>
-          m.id === pendingMsg.id
-            ? { ...m, pending: false, content: out.summary || "Updated the dashboard." }
-            : m,
-        ),
-        updatedAt: Date.now(),
-      }));
+            : s.title;
+        return {
+          ...s,
+          dashboard: nextDashboard,
+          model: out.model,
+          title: nextTitle,
+          messages: s.messages.map((m) =>
+            m.id === pendingMsg.id
+              ? { ...m, pending: false, content: out.reply || "(no reply)" }
+              : m,
+          ),
+          updatedAt: Date.now(),
+        };
+      });
     } catch (e) {
       const msg = e instanceof Error ? e.message : String(e);
       updateSession(sessionId, (s) => ({
