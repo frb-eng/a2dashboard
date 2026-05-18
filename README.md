@@ -126,7 +126,7 @@ flowchart TB
 
 The current implementation is deliberately narrow — just enough surface area to validate the three-layer model end-to-end. Everything else (charts, KPIs, aggregations, more endpoints, alternative renderers) lands as a named extension to this MVP, not by quietly widening it.
 
-- **UI:** `table` only, rendered with React + MUI.
+- **UI:** `table` for data plus `row` / `column` / `list` layout containers for composing several tables in one dashboard, rendered with React + MUI. Layout containers borrow their `justify` / `align` / `direction` vocabulary from Google's a2ui basic catalog.
 - **Aggregation:** none — bindings map endpoint response rows directly to table columns.
 - **Endpoint catalog:** two GitHub REST API endpoints (`https://api.github.com`). Unauthenticated for public data (60 req/hour) or authenticated with a GitHub Personal Access Token via `Authorization: Bearer <token>` (5000 req/hour):
   - `GET /users/{username}/repos` — paginated list of a user's public repositories (`type`, `sort`, `direction`, `page`, `per_page`).

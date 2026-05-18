@@ -6,6 +6,18 @@
  * the MVP. If a primitive is added, update both sides in the same change.
  */
 
+export type LayoutJustify =
+  | "start"
+  | "center"
+  | "end"
+  | "spaceBetween"
+  | "spaceAround"
+  | "spaceEvenly";
+
+export type LayoutAlign = "start" | "center" | "end" | "stretch";
+
+export type ListDirection = "vertical" | "horizontal";
+
 export interface TableColumn {
   id: string;
   header: string;
@@ -22,7 +34,34 @@ export interface TableNode {
   columns: TableColumn[];
 }
 
-export type UINode = TableNode;
+export interface RowNode {
+  type: "row";
+  id: string;
+  title?: string;
+  children: UINode[];
+  justify?: LayoutJustify;
+  align?: LayoutAlign;
+}
+
+export interface ColumnNode {
+  type: "column";
+  id: string;
+  title?: string;
+  children: UINode[];
+  justify?: LayoutJustify;
+  align?: LayoutAlign;
+}
+
+export interface ListNode {
+  type: "list";
+  id: string;
+  title?: string;
+  children: UINode[];
+  direction?: ListDirection;
+  align?: LayoutAlign;
+}
+
+export type UINode = TableNode | RowNode | ColumnNode | ListNode;
 
 export interface RowsBinding {
   type: "rows";

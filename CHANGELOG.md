@@ -4,6 +4,22 @@ All notable releases of `a2dashboard` are listed here. The README's
 Milestones table is the short-form view; this file holds the full
 release notes per tag.
 
+## Unreleased
+
+### Added
+
+- **Layout containers.** Three new UI primitives — `row`, `column`,
+  `list` — let the LLM compose several tables in one dashboard
+  (side-by-side, stacked, or scrolled along an axis). The `justify` /
+  `align` / `direction` vocabulary mirrors Google's a2ui basic catalog,
+  and the React renderer reuses the same component-registry pattern
+  found in the a2ui React renderer.
+- **Flat-components intermediate.** The LLM now emits the UI tree as a
+  flat `componentEntries[] + uiRootId` form (children referenced by id)
+  to dodge recursive-schema limits in OpenAI strict mode. The server
+  resolves it into the renderer-friendly `ui: UINode` tree with inline
+  `children: UINode[]`, with cycle and dangling-reference checks.
+
 ## v0.0.1 — Conversational, multi-session iteration (2026-05-18)
 
 First tagged milestone. The end-to-end loop works: a user describes a

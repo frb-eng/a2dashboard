@@ -38,8 +38,8 @@ When extending the system, **respect the layering**: don't push aggregation conc
 
 The first iteration is deliberately narrow so the three-layer model can be exercised end-to-end with the smallest possible surface area. Anything outside this scope is out of scope for the MVP, not "coming soon" — add it as a named extension when the time comes.
 
-- **UI primitives:** `table` only. No charts, KPIs, or layout containers yet.
-- **Renderer:** React + MUI (the `@mui/material` `Table` family, or `@mui/x-data-grid` if a feature requires it). One renderer; no abstraction over alternatives.
+- **UI primitives:** `table` for data, plus `row` / `column` / `list` layout containers for composing several tables in one dashboard. No charts or KPIs yet.
+- **Renderer:** React + MUI (the `@mui/material` `Table` family, or `@mui/x-data-grid` if a feature requires it). Layout containers are plain flex boxes whose `justify` / `align` / `direction` vocabulary mirrors Google's a2ui basic catalog, so a spec written for one renderer reads sensibly in the other. One renderer; no abstraction over alternatives.
 - **Aggregation engine:** none. Bindings map rows from a single endpoint response directly onto table columns. No `filter` / `group` / `agg` / `join` / `time-bucket` ops exist yet.
 - **Endpoint catalog:** two GitHub REST API endpoints (`https://api.github.com`). Requests can be unauthenticated for public data (60 req/hour) or authenticated with a GitHub Personal Access Token via `Authorization: Bearer <token>` (5000 req/hour):
   - `GET /users/{username}/repos` — paginated list of a user's public repositories. Query params: `type`, `sort`, `direction`, `page`, `per_page`.
@@ -47,9 +47,10 @@ The first iteration is deliberately narrow so the three-layer model can be exerc
 
 Implications for agents working in the MVP:
 
-- The LLM-facing spec should advertise exactly one UI primitive (`table`) and exactly these two endpoints. Don't tell the model about primitives that don't exist.
+- The LLM-facing spec should advertise exactly four UI primitives (`table`, `row`, `column`, `list`) and exactly these two endpoints. Don't tell the model about primitives that don't exist.
 - A binding is a `{ endpoint, field }` pair — no transformation step in between. If a column needs a derived value, that's a signal to add an aggregation primitive (and update the spec docs in the same change), not to inline logic in the renderer.
 - Pagination is the only "data behavior" the MVP supports beyond raw display. Keep refresh policy minimal (manual / on-mount) until a real use case demands more.
+- The UI tree is the renderer-facing shape (`ui: UINode` with inline `children: UINode[]`). The LLM emits a flat `componentEntries` + `uiRootId` form instead — see `server/src/llm.ts` — to dodge recursive JSON-schema limits in OpenAI strict mode. The server resolves the flat form into the tree before returning; any new layout primitive needs to be added on both sides of that conversion.
 
 ## Status
 
