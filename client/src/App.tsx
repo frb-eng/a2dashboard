@@ -7,7 +7,7 @@ import Stack from "@mui/material/Stack";
 import Paper from "@mui/material/Paper";
 import Alert from "@mui/material/Alert";
 import { PromptInput } from "./components/PromptInput";
-import { DashboardJsonView } from "./components/DashboardJsonView";
+import { DashboardView } from "./components/DashboardView";
 import { generate, type GenerateResponse } from "./api";
 
 export default function App() {
@@ -41,7 +41,7 @@ export default function App() {
         </Toolbar>
       </AppBar>
 
-      <Container maxWidth="md" sx={{ py: 4 }}>
+      <Container maxWidth="lg" sx={{ py: 4 }}>
         <Stack spacing={3}>
           <Paper variant="outlined" sx={{ p: 2 }}>
             <Typography variant="h6" sx={{ mb: 1 }}>
@@ -50,7 +50,7 @@ export default function App() {
             <Typography variant="body2" color="text.secondary" sx={{ mb: 2 }}>
               MVP: one <code>table</code> primitive, two GitHub endpoints
               (<code>users/&#123;u&#125;/repos</code>, <code>repos/&#123;o&#125;/&#123;r&#125;/issues</code>).
-              Renderer not wired up yet — the generated dashboard JSON is shown below.
+              The generated dashboard renders live; toggle to JSON to inspect the spec.
             </Typography>
             <PromptInput onSubmit={onSubmit} busy={busy} />
           </Paper>
@@ -58,7 +58,7 @@ export default function App() {
           {error && <Alert severity="error">{error}</Alert>}
 
           {response && (
-            <DashboardJsonView
+            <DashboardView
               dashboard={response.dashboard}
               model={response.model}
             />
