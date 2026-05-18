@@ -5,7 +5,7 @@ import { ThemeProvider, createTheme } from "@mui/material/styles";
 import App from "./App";
 
 const theme = createTheme({
-  palette: { mode: "light", primary: { main: "#1f6feb" } },
+  palette: { mode: "dark", primary: { main: "#58a6ff" } },
   shape: { borderRadius: 8 },
 });
 

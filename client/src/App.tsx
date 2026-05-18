@@ -60,7 +60,6 @@ export default function App() {
           {response && (
             <DashboardJsonView
               dashboard={response.dashboard}
-              stubbed={response.stubbed}
               model={response.model}
             />
           )}

@@ -9,8 +9,7 @@
 export interface GenerateResponse {
   dashboard: unknown;
   prompt: string;
-  stubbed: boolean;
-  model: string | null;
+  model: string;
 }
 
 export async function generate(prompt: string): Promise<GenerateResponse> {

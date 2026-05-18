@@ -211,6 +211,14 @@ function getClient(): OpenAI {
   return cachedClient;
 }
 
+export function assertLLMConfigured(): void {
+  if (!process.env.OPENAI_API_KEY) {
+    throw new Error(
+      "OPENAI_API_KEY is not set. Copy .env.example to .env and add your key.",
+    );
+  }
+}
+
 function toDashboard(i: IntermediateDashboard): Dashboard {
   return {
     version: i.version,
@@ -243,10 +251,6 @@ function toDashboard(i: IntermediateDashboard): Dashboard {
       ]),
     ),
   };
-}
-
-export function isLLMConfigured(): boolean {
-  return Boolean(process.env.OPENAI_API_KEY);
 }
 
 export async function generateDashboardViaLLM(prompt: string): Promise<Dashboard> {
