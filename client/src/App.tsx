@@ -1,38 +1,148 @@
-import { useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import AppBar from "@mui/material/AppBar";
 import Toolbar from "@mui/material/Toolbar";
 import Typography from "@mui/material/Typography";
 import Box from "@mui/material/Box";
 import Stack from "@mui/material/Stack";
-import Paper from "@mui/material/Paper";
-import Alert from "@mui/material/Alert";
-import { PromptInput } from "./components/PromptInput";
-import { DashboardView } from "./components/DashboardView";
-import { generate, type GenerateResponse } from "./api";
 
-const SIDEBAR_WIDTH = 380;
+import { ConversationPanel } from "./components/ConversationPanel";
+import { DashboardView } from "./components/DashboardView";
+import { SessionList } from "./components/SessionList";
+import { generate } from "./api";
+import {
+  createSession,
+  deriveTitle,
+  loadState,
+  newMessage,
+  saveActiveId,
+  saveSessions,
+  toHistory,
+  type DashboardSession,
+} from "./sessions";
+
+const SIDEBAR_LEFT = 260;
+const SIDEBAR_RIGHT = 380;
 
 export default function App() {
-  const [busy, setBusy] = useState(false);
-  const [error, setError] = useState<string | null>(null);
-  const [response, setResponse] = useState<GenerateResponse | null>(null);
+  const initial = useMemo(loadState, []);
+  const [sessions, setSessions] = useState<DashboardSession[]>(initial.sessions);
+  const [activeId, setActiveId] = useState<string | null>(initial.activeId);
+  // Tracks which sessions are awaiting a response. Lets the user switch
+  // sessions without losing the spinner on the one that's still working.
+  const busyIds = useRef<Set<string>>(new Set());
+  const [, forceTick] = useState(0);
 
-  const onSubmit = async (prompt: string) => {
-    setBusy(true);
-    setError(null);
+  useEffect(() => {
+    saveSessions(sessions);
+  }, [sessions]);
+
+  useEffect(() => {
+    saveActiveId(activeId);
+  }, [activeId]);
+
+  const active = sessions.find((s) => s.id === activeId) ?? null;
+  const activeBusy = active ? busyIds.current.has(active.id) : false;
+
+  const updateSession = useCallback(
+    (id: string, patch: (s: DashboardSession) => DashboardSession) => {
+      setSessions((prev) => prev.map((s) => (s.id === id ? patch(s) : s)));
+    },
+    [],
+  );
+
+  const ensureActiveSession = (): DashboardSession => {
+    if (active) return active;
+    const s = createSession();
+    setSessions((prev) => [s, ...prev]);
+    setActiveId(s.id);
+    return s;
+  };
+
+  const createNew = () => {
+    const s = createSession();
+    setSessions((prev) => [s, ...prev]);
+    setActiveId(s.id);
+  };
+
+  const deleteSession = (id: string) => {
+    busyIds.current.delete(id);
+    const next = sessions.filter((s) => s.id !== id);
+    setSessions(next);
+    if (activeId === id) {
+      setActiveId(next[0]?.id ?? null);
+    }
+  };
+
+  const handleSubmit = async (prompt: string) => {
+    const session = ensureActiveSession();
+    const sessionId = session.id;
+    if (busyIds.current.has(sessionId)) return;
+
+    const userMsg = newMessage("user", prompt);
+    const pendingMsg = newMessage("assistant", "", { pending: true });
+
+    // Capture history BEFORE we append the new turn so the server gets
+    // only previously-completed exchanges.
+    const history = toHistory(session.messages);
+    const current = session.dashboard;
+
+    updateSession(sessionId, (s) => ({
+      ...s,
+      title:
+        s.messages.length === 0 || s.title === "New dashboard"
+          ? deriveTitle(prompt, s.title)
+          : s.title,
+      messages: [...s.messages, userMsg, pendingMsg],
+      updatedAt: Date.now(),
+    }));
+
+    busyIds.current.add(sessionId);
+    forceTick((t) => t + 1);
+
     try {
-      const out = await generate(prompt);
-      setResponse(out);
+      const out = await generate({ prompt, history, current });
+      updateSession(sessionId, (s) => {
+        const nextDashboard = out.dashboard ?? s.dashboard;
+        const nextTitle =
+          out.dashboard && (s.title === "New dashboard" || s.messages.length <= 2)
+            ? out.dashboard.title || s.title
+            : s.title;
+        return {
+          ...s,
+          dashboard: nextDashboard,
+          model: out.model,
+          title: nextTitle,
+          messages: s.messages.map((m) =>
+            m.id === pendingMsg.id
+              ? { ...m, pending: false, content: out.reply || "(no reply)" }
+              : m,
+          ),
+          updatedAt: Date.now(),
+        };
+      });
     } catch (e) {
-      setError(e instanceof Error ? e.message : String(e));
+      const msg = e instanceof Error ? e.message : String(e);
+      updateSession(sessionId, (s) => ({
+        ...s,
+        messages: s.messages.map((m) =>
+          m.id === pendingMsg.id ? { ...m, pending: false, error: msg } : m,
+        ),
+        updatedAt: Date.now(),
+      }));
     } finally {
-      setBusy(false);
+      busyIds.current.delete(sessionId);
+      forceTick((t) => t + 1);
     }
   };
 
   return (
     <Box sx={{ display: "flex", flexDirection: "column", height: "100vh" }}>
-      <AppBar position="static" color="default" elevation={0} sx={{ borderBottom: 1, borderColor: "divider" }}>
+      <AppBar
+        position="static"
+        color="default"
+        elevation={0}
+        sx={{ borderBottom: 1, borderColor: "divider" }}
+      >
         <Toolbar>
           <Typography variant="h6" sx={{ fontWeight: 700, flexGrow: 1 }}>
             a2dashboard
@@ -45,6 +155,25 @@ export default function App() {
 
       <Box sx={{ flex: 1, display: "flex", minHeight: 0 }}>
         <Box
+          component="aside"
+          sx={{
+            width: SIDEBAR_LEFT,
+            flexShrink: 0,
+            borderRight: 1,
+            borderColor: "divider",
+            minHeight: 0,
+          }}
+        >
+          <SessionList
+            sessions={sessions}
+            activeId={activeId}
+            onSelect={setActiveId}
+            onCreate={createNew}
+            onDelete={deleteSession}
+          />
+        </Box>
+
+        <Box
           component="main"
           sx={{
             flex: 1,
@@ -54,49 +183,42 @@ export default function App() {
             bgcolor: "background.default",
           }}
         >
-          {response ? (
+          {active && active.dashboard ? (
             <DashboardView
-              dashboard={response.dashboard}
-              model={response.model}
+              key={active.id}
+              dashboard={active.dashboard}
+              model={active.model ?? ""}
             />
           ) : (
-            <EmptyState busy={busy} />
+            <EmptyState busy={activeBusy} hasSession={Boolean(active)} />
           )}
         </Box>
 
         <Box
           component="aside"
           sx={{
-            width: SIDEBAR_WIDTH,
+            width: SIDEBAR_RIGHT,
             flexShrink: 0,
             borderLeft: 1,
             borderColor: "divider",
-            overflow: "auto",
-            p: 2,
+            minHeight: 0,
+            display: "flex",
+            flexDirection: "column",
           }}
         >
-          <Stack spacing={2}>
-            <Paper variant="outlined" sx={{ p: 2 }}>
-              <Typography variant="h6" sx={{ mb: 1 }}>
-                Describe your dashboard
-              </Typography>
-              <Typography variant="body2" color="text.secondary" sx={{ mb: 2 }}>
-                MVP: one <code>table</code> primitive, two GitHub endpoints
-                (<code>users/&#123;u&#125;/repos</code>,{" "}
-                <code>repos/&#123;o&#125;/&#123;r&#125;/issues</code>).
-              </Typography>
-              <PromptInput onSubmit={onSubmit} busy={busy} />
-            </Paper>
-
-            {error && <Alert severity="error">{error}</Alert>}
-          </Stack>
+          <ConversationPanel
+            sessionId={active?.id ?? "none"}
+            messages={active?.messages ?? []}
+            busy={activeBusy}
+            onSubmit={handleSubmit}
+          />
         </Box>
       </Box>
     </Box>
   );
 }
 
-function EmptyState({ busy }: { busy: boolean }) {
+function EmptyState({ busy, hasSession }: { busy: boolean; hasSession: boolean }) {
   return (
     <Box
       sx={{
@@ -114,7 +236,9 @@ function EmptyState({ busy }: { busy: boolean }) {
         <Typography variant="body2">
           {busy
             ? "The model is composing the spec."
-            : "Describe one in the panel on the right to get started."}
+            : hasSession
+            ? "Describe one in the panel on the right to get started."
+            : "Create a new dashboard from the left sidebar, then describe it on the right."}
         </Typography>
       </Stack>
     </Box>
