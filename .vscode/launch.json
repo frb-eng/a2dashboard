@@ -10,7 +10,7 @@
       "runtimeArgs": [
         "--import",
         "tsx",
-        "--env-file-if-exists=.env"
+        "--env-file-if-exists=${workspaceFolder}/.env"
       ],
       "program": "${workspaceFolder}/server/src/index.ts",
       "console": "integratedTerminal",
