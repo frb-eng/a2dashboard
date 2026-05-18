@@ -2,13 +2,15 @@ import { useState } from "react";
 import AppBar from "@mui/material/AppBar";
 import Toolbar from "@mui/material/Toolbar";
 import Typography from "@mui/material/Typography";
-import Container from "@mui/material/Container";
+import Box from "@mui/material/Box";
 import Stack from "@mui/material/Stack";
 import Paper from "@mui/material/Paper";
 import Alert from "@mui/material/Alert";
 import { PromptInput } from "./components/PromptInput";
 import { DashboardView } from "./components/DashboardView";
 import { generate, type GenerateResponse } from "./api";
+
+const SIDEBAR_WIDTH = 380;
 
 export default function App() {
   const [busy, setBusy] = useState(false);
@@ -29,7 +31,7 @@ export default function App() {
   };
 
   return (
-    <>
+    <Box sx={{ display: "flex", flexDirection: "column", height: "100vh" }}>
       <AppBar position="static" color="default" elevation={0} sx={{ borderBottom: 1, borderColor: "divider" }}>
         <Toolbar>
           <Typography variant="h6" sx={{ fontWeight: 700, flexGrow: 1 }}>
@@ -41,30 +43,80 @@ export default function App() {
         </Toolbar>
       </AppBar>
 
-      <Container maxWidth="lg" sx={{ py: 4 }}>
-        <Stack spacing={3}>
-          <Paper variant="outlined" sx={{ p: 2 }}>
-            <Typography variant="h6" sx={{ mb: 1 }}>
-              Describe your dashboard
-            </Typography>
-            <Typography variant="body2" color="text.secondary" sx={{ mb: 2 }}>
-              MVP: one <code>table</code> primitive, two GitHub endpoints
-              (<code>users/&#123;u&#125;/repos</code>, <code>repos/&#123;o&#125;/&#123;r&#125;/issues</code>).
-              The generated dashboard renders live; toggle to JSON to inspect the spec.
-            </Typography>
-            <PromptInput onSubmit={onSubmit} busy={busy} />
-          </Paper>
-
-          {error && <Alert severity="error">{error}</Alert>}
-
-          {response && (
+      <Box sx={{ flex: 1, display: "flex", minHeight: 0 }}>
+        <Box
+          component="main"
+          sx={{
+            flex: 1,
+            minWidth: 0,
+            overflow: "auto",
+            p: 3,
+            bgcolor: "background.default",
+          }}
+        >
+          {response ? (
             <DashboardView
               dashboard={response.dashboard}
               model={response.model}
             />
+          ) : (
+            <EmptyState busy={busy} />
           )}
-        </Stack>
-      </Container>
-    </>
+        </Box>
+
+        <Box
+          component="aside"
+          sx={{
+            width: SIDEBAR_WIDTH,
+            flexShrink: 0,
+            borderLeft: 1,
+            borderColor: "divider",
+            overflow: "auto",
+            p: 2,
+          }}
+        >
+          <Stack spacing={2}>
+            <Paper variant="outlined" sx={{ p: 2 }}>
+              <Typography variant="h6" sx={{ mb: 1 }}>
+                Describe your dashboard
+              </Typography>
+              <Typography variant="body2" color="text.secondary" sx={{ mb: 2 }}>
+                MVP: one <code>table</code> primitive, two GitHub endpoints
+                (<code>users/&#123;u&#125;/repos</code>,{" "}
+                <code>repos/&#123;o&#125;/&#123;r&#125;/issues</code>).
+              </Typography>
+              <PromptInput onSubmit={onSubmit} busy={busy} />
+            </Paper>
+
+            {error && <Alert severity="error">{error}</Alert>}
+          </Stack>
+        </Box>
+      </Box>
+    </Box>
+  );
+}
+
+function EmptyState({ busy }: { busy: boolean }) {
+  return (
+    <Box
+      sx={{
+        height: "100%",
+        display: "flex",
+        alignItems: "center",
+        justifyContent: "center",
+        color: "text.secondary",
+      }}
+    >
+      <Stack spacing={1} alignItems="center">
+        <Typography variant="h6">
+          {busy ? "Generating your dashboard…" : "No dashboard yet"}
+        </Typography>
+        <Typography variant="body2">
+          {busy
+            ? "The model is composing the spec."
+            : "Describe one in the panel on the right to get started."}
+        </Typography>
+      </Stack>
+    </Box>
   );
 }
