@@ -29,8 +29,28 @@ app.post("/api/generate", async (req: Request, res: Response) => {
     res.status(400).json({ error: "Body must be { prompt: string } with a non-empty prompt." });
     return;
   }
+  if (body.history !== undefined) {
+    if (
+      !Array.isArray(body.history) ||
+      !body.history.every(
+        (m) =>
+          m &&
+          (m.role === "user" || m.role === "assistant") &&
+          typeof m.content === "string",
+      )
+    ) {
+      res.status(400).json({
+        error: "history must be an array of { role: 'user'|'assistant', content: string }.",
+      });
+      return;
+    }
+  }
   try {
-    const out = await generateDashboard({ prompt: body.prompt });
+    const out = await generateDashboard({
+      prompt: body.prompt,
+      history: body.history,
+      current: body.current ?? null,
+    });
     res.json(out);
   } catch (err) {
     console.error("generateDashboard failed:", err);

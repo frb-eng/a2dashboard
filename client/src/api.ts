@@ -6,17 +6,29 @@
 
 import type { Dashboard } from "./spec";
 
+export interface HistoryTurn {
+  role: "user" | "assistant";
+  content: string;
+}
+
+export interface GenerateRequest {
+  prompt: string;
+  history?: HistoryTurn[];
+  current?: Dashboard | null;
+}
+
 export interface GenerateResponse {
   dashboard: Dashboard;
+  summary: string;
   prompt: string;
   model: string;
 }
 
-export async function generate(prompt: string): Promise<GenerateResponse> {
+export async function generate(req: GenerateRequest): Promise<GenerateResponse> {
   const res = await fetch("/api/generate", {
     method: "POST",
     headers: { "content-type": "application/json" },
-    body: JSON.stringify({ prompt }),
+    body: JSON.stringify(req),
   });
   if (!res.ok) {
     const text = await res.text();

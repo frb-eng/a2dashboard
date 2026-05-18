@@ -10,6 +10,11 @@
  * server converts those to the real `Record<string, …>` form before
  * returning, so the public Dashboard contract is unchanged.
  *
+ * Iterating on a dashboard: the client may pass a `currentDashboard`
+ * and `history` of prior turns. The system prompt instructs the model
+ * to patch the existing JSON (preserving ids) rather than rewriting,
+ * matching the "patches, not rewrites" rule in AGENTS.md.
+ *
  * Model choice: `gpt-5-mini`. The output is small structured JSON, the
  * prompt is interactive (latency-sensitive), and the model needs enough
  * reasoning to honor the spec + endpoint catalog without drifting.
@@ -22,6 +27,11 @@ import type { Dashboard } from "./spec/dashboard.js";
 import { githubCatalog } from "./catalog/github.js";
 
 export const MODEL = "gpt-5-mini";
+
+export interface HistoryTurn {
+  role: "user" | "assistant";
+  content: string;
+}
 
 interface IntermediateColumn {
   id: string;
@@ -57,6 +67,8 @@ interface IntermediateCall {
 interface IntermediateDashboard {
   version: "0.1";
   title: string;
+  /** One-or-two sentence description of what this turn produced or changed. Shown as the assistant's chat reply. */
+  summary: string;
   ui: IntermediateUI;
   dataEntries: { id: string; binding: IntermediateBinding }[];
   endpointEntries: { id: string; call: IntermediateCall }[];
@@ -67,10 +79,11 @@ function dashboardSchema(): Record<string, unknown> {
   return {
     type: "object",
     additionalProperties: false,
-    required: ["version", "title", "ui", "dataEntries", "endpointEntries"],
+    required: ["version", "title", "summary", "ui", "dataEntries", "endpointEntries"],
     properties: {
       version: { type: "string", enum: ["0.1"] },
       title: { type: "string" },
+      summary: { type: "string" },
       ui: {
         type: "object",
         additionalProperties: false,
@@ -180,7 +193,19 @@ ${fields}`;
     .join("\n\n");
 }
 
-function systemPrompt(): string {
+function systemPrompt(current: Dashboard | null): string {
+  const iteration = current
+    ? `
+
+YOU ARE ITERATING ON AN EXISTING DASHBOARD. The current spec is shown below. Treat the latest user message as a refinement and PATCH this spec — do not rewrite from scratch.
+  - Preserve existing ids (ui node id, column ids, dataEntries[*].id, endpointEntries[*].id) whenever the underlying concept is unchanged. Stable ids let the user's mental model survive iteration.
+  - Only change the parts the user actually asked to change. Leave everything else identical.
+  - If the user asks something ambiguous, make a reasonable choice and proceed — do not ask follow-up questions.
+
+CURRENT DASHBOARD JSON:
+${JSON.stringify(current, null, 2)}`
+    : "";
+
   return `You are a2dashboard's spec generator. Convert the user's plain-language description into a Dashboard JSON document.
 
 THREE-LAYER MODEL (kept separable on purpose):
@@ -202,7 +227,8 @@ GUIDANCE
   - Use null for ui.title and binding.rowsPath when not needed; the catalogued endpoints return arrays at the top level so rowsPath is usually null.
   - Default refresh.kind to "on-mount".
   - Only include params that exist in the catalog above. Required path params (e.g. username, owner, repo) must be present.
-  - If the user names a GitHub user or owner/repo, use it verbatim. If unspecified, make a reasonable choice and proceed — do not ask follow-up questions.`;
+  - If the user names a GitHub user or owner/repo, use it verbatim. If unspecified, make a reasonable choice and proceed — do not ask follow-up questions.
+  - Always write a short \`summary\` describing what this turn produced or changed, written in the second person ("Showing…", "Added a column for…", "Switched the source to…"). One or two sentences max.${iteration}`;
 }
 
 let cachedClient: OpenAI | null = null;
@@ -217,6 +243,11 @@ export function assertLLMConfigured(): void {
       "OPENAI_API_KEY is not set. Copy .env.example to .env and add your key.",
     );
   }
+}
+
+export interface LLMResult {
+  dashboard: Dashboard;
+  summary: string;
 }
 
 function toDashboard(i: IntermediateDashboard): Dashboard {
@@ -253,12 +284,17 @@ function toDashboard(i: IntermediateDashboard): Dashboard {
   };
 }
 
-export async function generateDashboardViaLLM(prompt: string): Promise<Dashboard> {
+export async function generateDashboardViaLLM(
+  prompt: string,
+  history: HistoryTurn[] = [],
+  current: Dashboard | null = null,
+): Promise<LLMResult> {
   const client = getClient();
   const completion = await client.chat.completions.create({
     model: MODEL,
     messages: [
-      { role: "system", content: systemPrompt() },
+      { role: "system", content: systemPrompt(current) },
+      ...history.map((m) => ({ role: m.role, content: m.content })),
       { role: "user", content: prompt },
     ],
     response_format: {
@@ -275,5 +311,5 @@ export async function generateDashboardViaLLM(prompt: string): Promise<Dashboard
   const content = completion.choices[0]?.message.content;
   if (!content) throw new Error("OpenAI returned an empty completion.");
   const parsed = JSON.parse(content) as IntermediateDashboard;
-  return toDashboard(parsed);
+  return { dashboard: toDashboard(parsed), summary: parsed.summary };
 }
