@@ -41,9 +41,9 @@ The first iteration is deliberately narrow so the three-layer model can be exerc
 - **UI primitives:** `table` only. No charts, KPIs, or layout containers yet.
 - **Renderer:** React + MUI (the `@mui/material` `Table` family, or `@mui/x-data-grid` if a feature requires it). One renderer; no abstraction over alternatives.
 - **Aggregation engine:** none. Bindings map rows from a single endpoint response directly onto table columns. No `filter` / `group` / `agg` / `join` / `time-bucket` ops exist yet.
-- **Endpoint catalog:** two Strava endpoints, both authenticated with an OAuth2 bearer token:
-  - `GET /athlete/activities` — paginated list of the authenticated athlete's activities. Query params: `before`, `after`, `page`, `per_page`.
-  - `GET /segments/starred` — paginated list of the athlete's starred segments. Query params: `page`, `per_page`.
+- **Endpoint catalog:** two GitHub REST API endpoints (`https://api.github.com`). Requests can be unauthenticated for public data (60 req/hour) or authenticated with a GitHub Personal Access Token via `Authorization: Bearer <token>` (5000 req/hour):
+  - `GET /users/{username}/repos` — paginated list of a user's public repositories. Query params: `type`, `sort`, `direction`, `page`, `per_page`.
+  - `GET /repos/{owner}/{repo}/issues` — paginated list of issues for a repository. Query params: `state`, `labels`, `sort`, `direction`, `since`, `page`, `per_page`.
 
 Implications for agents working in the MVP:
 

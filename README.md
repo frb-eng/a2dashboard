@@ -128,9 +128,9 @@ The current implementation is deliberately narrow — just enough surface area t
 
 - **UI:** `table` only, rendered with React + MUI.
 - **Aggregation:** none — bindings map endpoint response rows directly to table columns.
-- **Endpoint catalog:** two Strava endpoints, both authenticated with an OAuth2 bearer token:
-  - `GET /athlete/activities` — paginated list of the athlete's recent activities (`before`, `after`, `page`, `per_page`).
-  - `GET /segments/starred` — paginated list of the athlete's starred segments (`page`, `per_page`).
+- **Endpoint catalog:** two GitHub REST API endpoints (`https://api.github.com`). Unauthenticated for public data (60 req/hour) or authenticated with a GitHub Personal Access Token via `Authorization: Bearer <token>` (5000 req/hour):
+  - `GET /users/{username}/repos` — paginated list of a user's public repositories (`type`, `sort`, `direction`, `page`, `per_page`).
+  - `GET /repos/{owner}/{repo}/issues` — paginated list of issues for a repository (`state`, `labels`, `sort`, `direction`, `since`, `page`, `per_page`).
 
 In practice, an MVP dashboard JSON looks like a `table` UI node whose columns are bound to fields from one of those two endpoints, with pagination as the only data-side behavior.
 
