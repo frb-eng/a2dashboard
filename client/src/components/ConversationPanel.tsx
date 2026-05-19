@@ -29,6 +29,7 @@ const EXAMPLES: string[] = [
   "List mucsi96's repos with name and number of stars",
   "Show open issues in vercel/next.js with title and author",
   "Recently updated repositories of @anthropics",
+  "I want to see the open issues for react, angular and vue projects.",
 ];
 
 interface ConversationPanelProps {
