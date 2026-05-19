@@ -9,18 +9,7 @@
 
 export type RefreshPolicy =
   | { kind: "manual" }
-  | { kind: "on-mount" }
-  /**
-   * Gate the fetch on the named state slots being populated. Until every
-   * slot in `stateKeys` resolves to a non-empty value, the binding sits
-   * idle — no fetch, no error. The slots are written by `textField`
-   * keystrokes or by `setStateAndRefresh` actions; once they are set, the
-   * normal refresh tick (bumped by `setStateAndRefresh` or `refresh`)
-   * fires the fetch. Used for the master-detail right panel so it does
-   * not blow up on mount with "missing path param" before the user has
-   * picked a row.
-   */
-  | { kind: "when-state-set"; stateKeys: string[] };
+  | { kind: "on-mount" };
 
 /**
  * Reference to a value held in the dashboard's shared state map, written

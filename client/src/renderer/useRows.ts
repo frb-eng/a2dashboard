@@ -10,10 +10,19 @@
  * the shared `refreshTick`, this effect re-runs and rebuilds the URL
  * against the current `textField` slot values. Typing into a field
  * alone does NOT refetch — the button is the explicit "go".
+ *
+ * Required-param gate: if the underlying rows binding's endpoint call
+ * binds a *required* catalog param to a `{ stateKey }` whose slot is
+ * currently empty (e.g. master-detail's right panel before any row is
+ * clicked), the fetch is held and the hook returns `idle: true` with
+ * the pending state keys. The `setStateAndRefresh` action writes the
+ * slot and bumps `refreshTick` in one step, so the effect re-runs and
+ * the gate opens automatically. Optional params with empty state refs
+ * are simply omitted from the URL (existing behavior).
  */
 
 import { useCallback, useEffect, useState } from "react";
-import type { Binding, Dashboard } from "../spec";
+import type { Binding, CatalogEntry, Dashboard, EndpointCall } from "../spec";
 import { fetchRows, findRootRowsBinding, loadCatalog } from "./data";
 import { useDashboardState } from "./DashboardStateContext";
 
@@ -22,15 +31,38 @@ export interface RowsState {
   loading: boolean;
   error: string | null;
   /**
-   * True when the binding's endpoint has refresh kind `when-state-set`
-   * and at least one of the required state slots is still empty. The
-   * fetch is intentionally skipped — the table renders a placeholder
-   * instead of an error.
+   * True when the fetch is intentionally held because a required
+   * catalog param is bound to an empty state slot. The table renders a
+   * placeholder instead of an error.
    */
   idle: boolean;
   /** State keys the binding is waiting on (only set when `idle` is true). */
   pendingStateKeys: string[];
   refresh: () => void;
+}
+
+/**
+ * Return the names of state slots that back a *required* catalog param
+ * but currently resolve to "". Empty array when the call is ready to
+ * fire. The catalog is the source of truth for which params are
+ * required, so no per-binding annotation is needed in the spec.
+ */
+function pendingRequiredStateKeys(
+  call: EndpointCall,
+  catalog: CatalogEntry[],
+  getValue: (key: string) => string,
+): string[] {
+  const entry = catalog.find((e) => e.id === call.endpointId);
+  if (!entry) return [];
+  const pending: string[] = [];
+  for (const param of entry.params) {
+    if (!param.required) continue;
+    const raw = call.params[param.name];
+    if (raw && typeof raw === "object" && "stateKey" in raw) {
+      if (getValue(raw.stateKey) === "") pending.push(raw.stateKey);
+    }
+  }
+  return pending;
 }
 
 export function useRows(
@@ -51,34 +83,29 @@ export function useRows(
   useEffect(() => {
     if (!binding) return;
     let cancelled = false;
-
-    // Endpoint-level gate: when the underlying rows binding's endpoint
-    // call has refresh.kind "when-state-set", hold the fetch until every
-    // listed slot has a non-empty value. The setStateAndRefresh action
-    // bumps refreshTick after writing a slot, so this effect re-runs and
-    // re-checks — opening the gate the moment the user clicks a row.
-    const rootRows = findRootRowsBinding(binding, dashboard);
-    const call = rootRows ? dashboard.endpoints[rootRows.endpoint] : undefined;
-    if (call && call.refresh.kind === "when-state-set") {
-      const pending = call.refresh.stateKeys.filter((k) => getValue(k) === "");
-      if (pending.length > 0) {
-        setIdle(true);
-        setPendingStateKeys(pending);
-        setRows(null);
-        setLoading(false);
-        setError(null);
-        return;
-      }
-    }
-
-    setIdle(false);
-    setPendingStateKeys([]);
     setLoading(true);
     setError(null);
 
     (async () => {
       try {
         const catalog = await loadCatalog();
+        if (cancelled) return;
+
+        const rootRows = findRootRowsBinding(binding, dashboard);
+        const call = rootRows ? dashboard.endpoints[rootRows.endpoint] : undefined;
+        if (call) {
+          const pending = pendingRequiredStateKeys(call, catalog, getValue);
+          if (pending.length > 0) {
+            setIdle(true);
+            setPendingStateKeys(pending);
+            setRows(null);
+            setLoading(false);
+            return;
+          }
+        }
+        setIdle(false);
+        setPendingStateKeys([]);
+
         const result = await fetchRows(binding, dashboard, catalog, getValue);
         if (!cancelled) setRows(result);
       } catch (e) {
@@ -97,7 +124,7 @@ export function useRows(
     // read inside the async block — we don't depend on it directly so
     // keystrokes alone don't refire (a `filter` binding's state ref is
     // resolved at fetch time, so this is what gives the user the
-    // "button applies the filter" UX). The `when-state-set` gate is
+    // "button applies the filter" UX). The required-param gate is
     // re-checked on every refreshTick bump because setStateAndRefresh
     // writes the slot AND bumps the tick in one step.
     // eslint-disable-next-line react-hooks/exhaustive-deps

@@ -6,20 +6,21 @@ release notes per tag.
 
 ## Unreleased
 
-- **Third `RefreshPolicy` variant — `when-state-set`.** Gates the fetch
-  until every named state slot is non-empty. The master-detail right
-  panel was previously documented as "starts in an error state until
-  the user clicks a row; that is expected" — bad UX baked into the
-  contract. The new variant turns that into an explicit declarative
-  primitive: the right table's `refresh` is `{ kind: "when-state-set",
-  stateKeys: ["<slot>"] }`, so on mount the binding sits idle ("Waiting
-  for <slot>…") instead of throwing "Missing required path param". The
-  row-click action writes the slot and bumps the refresh tick in one
-  step, opening the gate. No new UI primitive, no UI-layer leak — the
-  decision "should we fetch?" stays in the endpoint-requirement layer.
-  `useRows` walks the binding's `source` chain to its underlying `rows`
-  binding to find the endpoint call, so the gate works for filter
-  chains too.
+- **Required-param fetch gate — no spec change, no "missing path param"
+  on master-detail mount.** The master-detail right panel was
+  previously documented as "starts in an error state until the user
+  clicks a row; that is expected" — bad UX baked into the contract.
+  The renderer now derives the gate from existing data: if the
+  underlying rows binding's endpoint call binds a *required* catalog
+  param to a `{ stateKey }` whose slot is empty, `useRows` holds the
+  fetch and returns `idle: true` with the pending state keys. The
+  table renders "Waiting for &lt;slot&gt;…" instead of throwing. The
+  `setStateAndRefresh` action already writes the slot and bumps the
+  refresh tick in one step, so the gate opens automatically on the row
+  click; no new primitive in the spec, no new `RefreshPolicy` variant
+  — the catalog's `required` flag is the only source of truth.
+  `useRows` walks the binding's `source` chain to its underlying
+  `rows` binding, so the gate works for filter chains too.
 
 - **Third catalogued endpoint — `github.repoContributors`.** `GET
   /repos/{owner}/{repo}/contributors` joins `userRepos` and

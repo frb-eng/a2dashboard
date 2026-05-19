@@ -282,20 +282,10 @@ interface IntermediateParam {
   stateKey: string | null;
 }
 
-/**
- * Refresh policy in the LLM-emitted form. `stateKeys` is non-null only
- * when `kind === "when-state-set"`; the server flattens this into the
- * public `RefreshPolicy` union in `toRefresh` below.
- */
-interface IntermediateRefresh {
-  kind: "manual" | "on-mount" | "when-state-set";
-  stateKeys: string[] | null;
-}
-
 interface IntermediateCall {
   endpointId: string;
   params: IntermediateParam[];
-  refresh: IntermediateRefresh;
+  refresh: { kind: "manual" | "on-mount" };
 }
 
 interface IntermediateDashboard {
@@ -614,18 +604,9 @@ function dashboardObjectSchema(): Record<string, unknown> {
                 refresh: {
                   type: "object",
                   additionalProperties: false,
-                  required: ["kind", "stateKeys"],
+                  required: ["kind"],
                   properties: {
-                    kind: {
-                      type: "string",
-                      enum: ["manual", "on-mount", "when-state-set"],
-                    },
-                    stateKeys: {
-                      anyOf: [
-                        { type: "null" },
-                        { type: "array", items: { type: "string" } },
-                      ],
-                    },
+                    kind: { type: "string", enum: ["manual", "on-mount"] },
                   },
                 },
               },
@@ -759,13 +740,13 @@ GUIDANCE
   - Use \`text\` for headings and standalone labels in a layout. For plain tabular data, prefer a plain \`field\` column over a \`text\` cell — the cell-component path is for when you actually need composition (icon + value, badge, etc.).
   - When composing a custom cell, put a \`row\` (for icon+text) or \`column\` (for stacked lines) at \`cellId\` and reference \`text\` / \`icon\` leaves from there. \`text\` inside a cell uses \`field\` to read the row.
   - Reach for \`textField\` + \`button\` when the user wants the dashboard to be interactive — e.g. "let me type a GitHub username and show their repos", "let me filter issues by label". The standard pattern is a \`column\` holding one or more \`textField\`s, a primary \`button\` whose action is { kind: "refresh", stateKey: null, valueField: null }, and the data \`table\` underneath. The button is the explicit "go" — endpoints do NOT refetch on every keystroke, only when the button is pressed or on mount.
-  - For master-detail layouts ("click a row on the left, show its details on the right"), put a \`row\` (or two cards in a row) at the root with two \`table\`s side by side. The left table sets \`onRowClick\` to { kind: "setStateAndRefresh", stateKey: "<slot>", valueField: "<field on the row, e.g. name>" }. The right table's \`rows\` binding points at an endpoint whose path or query param consumes that slot via \`{ stateKey: "<same slot>" }\`. There is no textField in this pattern — the row click is the input. Set the right endpoint's \`refresh\` to { kind: "when-state-set", stateKeys: ["<same slot>"] } so it sits idle on mount (no error, no fetch) until the user clicks a row; the row click writes the slot and bumps the refresh tick, opening the gate.
+  - For master-detail layouts ("click a row on the left, show its details on the right"), put a \`row\` (or two cards in a row) at the root with two \`table\`s side by side. The left table sets \`onRowClick\` to { kind: "setStateAndRefresh", stateKey: "<slot>", valueField: "<field on the row, e.g. name>" }. The right table's \`rows\` binding points at an endpoint whose path or query param consumes that slot via \`{ stateKey: "<same slot>" }\`. There is no textField in this pattern — the row click is the input. The renderer detects that the right endpoint's required path param is a state ref into an empty slot and holds the fetch until the user clicks a row; until then the right table sits idle with a "Waiting for <slot>…" placeholder, not an error. The row click writes the slot and bumps the refresh tick, opening the gate.
   - When a textField feeds an endpoint param, give the textField a sensible \`defaultValue\` so the dashboard renders something on mount. Set the matching endpoint param's \`value\` to null and its \`stateKey\` to the textField's stateKey.
   - When the user wants free-text search over rows ("search issues by title pattern", "find repos whose name contains X"), use a \`filter\` binding with op "containsIgnoreCase". The table's \`rows\` then points at the filter binding; the filter's \`source\` points at the underlying \`rows\` binding. The filter's \`stateKey\` matches the search textField. The button's \`refresh\` action re-evaluates the filter at the same time it refetches data — an empty search field matches every row, so omit \`defaultValue\` on the search textField when you want everything visible on mount.
   - A button's \`childId\` is typically a \`text\` leaf ("Search", "Refresh", "Load"). For icon-only buttons, point \`childId\` at an \`icon\`.
   - For tables: pick 4–7 useful columns. Column \`field\` is a dotted path into the row object (e.g. "owner.login").
   - Use null for title, justify, align, direction, rowsPath when not needed; the catalogued endpoints return arrays at the top level so rowsPath is usually null.
-  - Default refresh.kind to "on-mount". Use "when-state-set" when an endpoint's path/query param reads a state slot that is empty on mount (the master-detail right panel) — list every such slot in \`stateKeys\` and set \`stateKeys: null\` for the other two kinds.
+  - Default refresh.kind to "on-mount".
   - Only include params that exist in the catalog above. Required path params (e.g. username, owner, repo) must be present.
   - If the user names a GitHub user or owner/repo, use it verbatim. If the request is otherwise actionable but a minor detail is unspecified, pick a sensible default and proceed.${iteration}`;
 }
@@ -917,25 +898,6 @@ function buildUITree(
   }
 }
 
-function toRefresh(
-  r: IntermediateRefresh,
-  callId: string,
-): import("./spec/endpoint.js").RefreshPolicy {
-  switch (r.kind) {
-    case "manual":
-      return { kind: "manual" };
-    case "on-mount":
-      return { kind: "on-mount" };
-    case "when-state-set":
-      if (r.stateKeys == null || r.stateKeys.length === 0) {
-        throw new Error(
-          `Endpoint call "${callId}" has refresh.kind "when-state-set" but no stateKeys.`,
-        );
-      }
-      return { kind: "when-state-set", stateKeys: r.stateKeys };
-  }
-}
-
 function toBinding(
   id: string,
   b: IntermediateBinding,
@@ -992,7 +954,7 @@ function toDashboard(i: IntermediateDashboard): Dashboard {
               return [p.name, p.value];
             }),
           ),
-          refresh: toRefresh(e.call.refresh, e.id),
+          refresh: e.call.refresh,
         },
       ]),
     ),
