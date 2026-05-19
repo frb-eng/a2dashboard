@@ -20,7 +20,6 @@ import {
   type DashboardSession,
 } from "./sessions";
 
-const SIDEBAR_LEFT = 260;
 const SIDEBAR_RIGHT = 380;
 
 export default function App() {
@@ -155,25 +154,6 @@ export default function App() {
 
       <Box sx={{ flex: 1, display: "flex", minHeight: 0 }}>
         <Box
-          component="aside"
-          sx={{
-            width: SIDEBAR_LEFT,
-            flexShrink: 0,
-            borderRight: 1,
-            borderColor: "divider",
-            minHeight: 0,
-          }}
-        >
-          <SessionList
-            sessions={sessions}
-            activeId={activeId}
-            onSelect={setActiveId}
-            onCreate={createNew}
-            onDelete={deleteSession}
-          />
-        </Box>
-
-        <Box
           component="main"
           sx={{
             flex: 1,
@@ -206,12 +186,32 @@ export default function App() {
             flexDirection: "column",
           }}
         >
-          <ConversationPanel
-            sessionId={active?.id ?? "none"}
-            messages={active?.messages ?? []}
-            busy={activeBusy}
-            onSubmit={handleSubmit}
-          />
+          <Box
+            sx={{
+              flexShrink: 0,
+              maxHeight: "40%",
+              display: "flex",
+              flexDirection: "column",
+              borderBottom: 1,
+              borderColor: "divider",
+            }}
+          >
+            <SessionList
+              sessions={sessions}
+              activeId={activeId}
+              onSelect={setActiveId}
+              onCreate={createNew}
+              onDelete={deleteSession}
+            />
+          </Box>
+          <Box sx={{ flex: 1, minHeight: 0, display: "flex", flexDirection: "column" }}>
+            <ConversationPanel
+              sessionId={active?.id ?? "none"}
+              messages={active?.messages ?? []}
+              busy={activeBusy}
+              onSubmit={handleSubmit}
+            />
+          </Box>
         </Box>
       </Box>
     </Box>
@@ -238,7 +238,7 @@ function EmptyState({ busy, hasSession }: { busy: boolean; hasSession: boolean }
             ? "The model is composing the spec."
             : hasSession
             ? "Describe one in the panel on the right to get started."
-            : "Create a new dashboard from the left sidebar, then describe it on the right."}
+            : "Create a new dashboard from the panel on the right, then describe it."}
         </Typography>
       </Stack>
     </Box>
