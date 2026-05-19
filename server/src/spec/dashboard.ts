@@ -44,7 +44,15 @@ export type {
   LayoutAlign,
   ListDirection,
 } from "./ui.js";
-export type { Binding, RowsBinding, FilterBinding, FilterOp } from "./data.js";
+export type {
+  Binding,
+  RowsBinding,
+  FilterBinding,
+  FilterOp,
+  LimitBinding,
+  SortBinding,
+  SortDirection,
+} from "./data.js";
 export type {
   EndpointCall,
   RefreshPolicy,

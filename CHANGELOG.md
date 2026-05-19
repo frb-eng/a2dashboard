@@ -4,10 +4,35 @@ All notable releases of `a2dashboard` are listed here. The README's
 Milestones table is the short-form view; this file holds the full
 release notes per tag.
 
-## Unreleased
+## v0.0.3 — Master-detail and top-N pipelines (2026-05-19)
 
-- **Required-param fetch gate — no spec change, no "missing path param"
-  on master-detail mount.** The master-detail right panel was
+Third tagged milestone. Dashboards stop being one panel that you read
+and start being two panels you wire together with a click. The data
+layer learns to say "top N by X" without help from the endpoint, the
+UI layer learns to react to row clicks, and the renderer learns to
+wait quietly for a click instead of throwing on it. Same three-layer
+model, same prompt-to-live-dashboard loop — one new endpoint, one new
+action, two new aggregation primitives, one new fetch state.
+
+### Highlights
+
+- **Row-click actions on `table` + `setStateAndRefresh` —
+  master-detail without code.** The `Action` union (previously
+  button-only, previously `refresh`-only) gains a second variant
+  `{ kind: "setStateAndRefresh", stateKey, valueField }` that reads
+  `valueField` from the surrounding row, writes it into the named
+  state slot, and bumps the refresh tick in one step. Tables now
+  carry an optional `onRowClick: Action` that dispatches with the
+  clicked row in scope; buttons inside a table cell pick up the
+  cell's row via `RowContext` so the same action works there too.
+  Together this is the master-detail wiring — a click on the left
+  table writes a slot that the right panel's endpoint param consumes
+  via `{ stateKey }`, with no `textField` and no code escape hatch.
+  Same closed dispatch as before: the renderer's switch has the
+  complete vocabulary, and new actions land as new variants.
+
+- **Required-param fetch gate — no spec change, no "missing path
+  param" on master-detail mount.** The master-detail right panel was
   previously documented as "starts in an error state until the user
   clicks a row; that is expected" — bad UX baked into the contract.
   The renderer now derives the gate from existing data: if the
@@ -33,20 +58,61 @@ release notes per tag.
   the rows of that entry and the OpenAI strict-mode `endpointId` enum
   picks up the new id automatically.
 
-- **Row-click actions on `table` + `setStateAndRefresh` —
-  master-detail without code.** The `Action` union (previously
-  button-only, previously `refresh`-only) gains a second variant
-  `{ kind: "setStateAndRefresh", stateKey, valueField }` that reads
-  `valueField` from the surrounding row, writes it into the named
-  state slot, and bumps the refresh tick in one step. Tables now
-  carry an optional `onRowClick: Action` that dispatches with the
-  clicked row in scope; buttons inside a table cell pick up the
-  cell's row via `RowContext` so the same action works there too.
-  Together this is the master-detail wiring — a click on the left
-  table writes a slot that the right panel's endpoint param consumes
-  via `{ stateKey }`, with no `textField` and no code escape hatch.
-  Same closed dispatch as before: the renderer's switch has the
-  complete vocabulary, and new actions land as new variants.
+- **`limit` binding — the "top N" primitive.** New typed binding
+  variant `{ type: "limit", source, count }` truncates a source
+  binding's rows to at most `count` entries. Row order is preserved
+  verbatim, so `limit` over an already-ordered endpoint (e.g.
+  `github.repoContributors` is by commit count desc ⇒ "top N
+  contributors") expresses "top N" without a server-side sort.
+  Chains freely through `source` so a `limit` can wrap a `filter`
+  ("top N of the filtered rows"), a `sort` (see below — the canonical
+  "top N by X" pipeline), or another `limit`. `count` is a
+  non-negative integer literal; a `{ stateKey }` form lands later
+  if a real use case demands it.
+
+- **`sort` binding — client-side ordering when the endpoint can't
+  sort.** New typed variant `{ type: "sort", source, field,
+  direction }` reorders a source binding's rows by a single field.
+  Comparison is numeric when both values are finite numbers, else
+  string-coerced (case-sensitive); `null` / `undefined` sort to the
+  end regardless of direction — the useful default for "top N by X"
+  tables. `direction` is `asc` / `desc`. Use when the endpoint
+  exposes no matching `sort` query param — e.g. `github.userRepos`
+  has no "by stars" sort, so `rows` → `sort(stargazers_count, desc)`
+  → `limit(10)` is the canonical "top 10 by stars" pipeline. When
+  the endpoint already supports the requested ordering, prefer the
+  endpoint's own `sort` / `direction` params; client-side `sort` is
+  for orderings the endpoint can't express server-side.
+
+### Scope (still intentionally narrow)
+
+- UI vocabulary: same ten primitives as v0.0.2 — `table`, `row`,
+  `column`, `list`, `card`, `tabs`, `text`, `icon`, `textField`,
+  `button`. Charts, KPIs, sliders, selects, checkboxes still refused
+  with a textual reply.
+- Aggregation: four typed binding variants — `rows`, `filter` (op
+  `containsIgnoreCase`), `sort`, `limit`. No `group` / `agg` /
+  `join` / `time-bucket` yet, and no `filter` operators beyond
+  case-insensitive substring.
+- Actions: two — `refresh`, `setStateAndRefresh`. New variants land
+  as new spec union members + new switch arms in the renderer's
+  dispatch, never as a code escape hatch.
+- Endpoint catalog: three GitHub endpoints (`github.userRepos`,
+  `github.repoIssues`, `github.repoContributors`). Per-tenant
+  OpenAPI ingest is still on the roadmap.
+- Refresh policy: same two (`manual`, `on-mount`); the
+  required-param fetch gate is derived from the catalog, not a
+  new `RefreshPolicy` variant.
+
+### Known gaps to address next
+
+- More aggregation operators (filter ops `equals` / `gt` / `in`;
+  `group` / `agg` / `join` / `time-bucket`).
+- More UI primitives (chart, KPI tile, slider, select, checkbox)
+  for dashboards that aren't tabular.
+- More actions / refresh semantics (refresh-one, navigate, submit).
+- User-registered endpoints via OpenAPI ingest, so the catalog
+  stops being hardcoded.
 
 ## v0.0.2 — Composable, interactive dashboards (2026-05-19)
 

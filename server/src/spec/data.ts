@@ -56,7 +56,52 @@ export interface FilterBinding {
 }
 
 /**
+ * Truncates another binding's rows to at most `count` entries — the
+ * "top N" primitive. Combine with an endpoint that returns rows in a
+ * useful order (e.g. `github.repoContributors` is ordered by commit
+ * count desc, so `limit 3` is the top 3 contributors) to express "top
+ * N" without a server-side sort param.
+ *
+ * `count` is a non-negative integer literal — keep the surface area
+ * named and finite. A state-ref form can land later as a new variant
+ * if a real use case demands it.
+ */
+export interface LimitBinding {
+  type: "limit";
+  /** Id of another binding in `Dashboard.data` whose rows we truncate. */
+  source: string;
+  /** Maximum number of rows to keep. Must be a non-negative integer. */
+  count: number;
+}
+
+/**
+ * Sort direction for the `sort` binding. New directions land as new enum
+ * values + matching evaluator branches — same discipline as `FilterOp`.
+ */
+export type SortDirection = "asc" | "desc";
+
+/**
+ * Reorders another binding's rows by a single field. Pure ordering — no
+ * filtering, no truncation — so chaining with `limit` is the natural
+ * "top N by X" pattern (e.g. sort repos by `stargazers_count` desc,
+ * then limit to 10).
+ *
+ * Comparison is numeric when both values are finite numbers, else
+ * string-coerced (case-sensitive) — the same rule any reviewer would
+ * write by hand. Rows with `null` / `undefined` at `field` sort to the
+ * end regardless of direction.
+ */
+export interface SortBinding {
+  type: "sort";
+  /** Id of another binding in `Dashboard.data` whose rows we reorder. */
+  source: string;
+  /** Dotted path into each row identifying the field to sort by. */
+  field: string;
+  direction: SortDirection;
+}
+
+/**
  * Discriminated union over every binding kind. Add a variant + its
  * evaluator branch together; never both ends in separate changes.
  */
-export type Binding = RowsBinding | FilterBinding;
+export type Binding = RowsBinding | FilterBinding | LimitBinding | SortBinding;

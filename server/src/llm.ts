@@ -263,7 +263,37 @@ interface IntermediateFilterBinding {
   stateKey: string | null;
 }
 
-type IntermediateBinding = IntermediateRowsBinding | IntermediateFilterBinding;
+/**
+ * Limit binding in the LLM-emitted form. Truncates `source` rows to at
+ * most `count` entries — the "top N" primitive. `count` is a
+ * non-negative integer literal.
+ */
+interface IntermediateLimitBinding {
+  type: "limit";
+  source: string;
+  count: number;
+}
+
+const SORT_DIRECTION_VALUES = ["asc", "desc"] as const;
+type IntermediateSortDirection = (typeof SORT_DIRECTION_VALUES)[number];
+
+/**
+ * Sort binding in the LLM-emitted form. Reorders `source` rows by a
+ * single `field` in the given `direction`. Chain with `limit` for
+ * "top N by X".
+ */
+interface IntermediateSortBinding {
+  type: "sort";
+  source: string;
+  field: string;
+  direction: IntermediateSortDirection;
+}
+
+type IntermediateBinding =
+  | IntermediateRowsBinding
+  | IntermediateFilterBinding
+  | IntermediateLimitBinding
+  | IntermediateSortBinding;
 
 /**
  * Endpoint param value carried in the LLM-emitted intermediate form.
@@ -529,8 +559,42 @@ function filterBindingSchema(): Record<string, unknown> {
   };
 }
 
+function limitBindingSchema(): Record<string, unknown> {
+  return {
+    type: "object",
+    additionalProperties: false,
+    required: ["type", "source", "count"],
+    properties: {
+      type: { type: "string", enum: ["limit"] },
+      source: { type: "string" },
+      count: { type: "integer", minimum: 0 },
+    },
+  };
+}
+
+function sortBindingSchema(): Record<string, unknown> {
+  return {
+    type: "object",
+    additionalProperties: false,
+    required: ["type", "source", "field", "direction"],
+    properties: {
+      type: { type: "string", enum: ["sort"] },
+      source: { type: "string" },
+      field: { type: "string" },
+      direction: { type: "string", enum: [...SORT_DIRECTION_VALUES] },
+    },
+  };
+}
+
 function bindingSchema(): Record<string, unknown> {
-  return { anyOf: [rowsBindingSchema(), filterBindingSchema()] };
+  return {
+    anyOf: [
+      rowsBindingSchema(),
+      filterBindingSchema(),
+      limitBindingSchema(),
+      sortBindingSchema(),
+    ],
+  };
 }
 
 function dashboardObjectSchema(): Record<string, unknown> {
@@ -714,16 +778,18 @@ THREE-LAYER MODEL (when producing a dashboard)
      button variant   ∈ ${BUTTON_VARIANT_VALUES.map((v) => `"${v}"`).join(" | ")}.
      icon name ∈ ${ICON_NAME_VALUES.map((v) => `"${v}"`).join(" | ")}.
 
-  2. dataEntries — bindings that name how rows are produced. Two variants:
+  2. dataEntries — bindings that name how rows are produced. Four variants:
        - \`rows\`   — fetch from an endpoint and pass the response array through unchanged. Fields: \`endpoint\` (endpoint entry id), \`rowsPath\` (dotted path into the response body when the array isn't at the top level; null for the catalogued GitHub endpoints).
-       - \`filter\` — keep only rows from another binding whose \`field\` matches \`value\`. Fields: \`source\` (id of another binding in dataEntries — typically a \`rows\` binding, but filters can chain), \`field\` (dotted path into each row, e.g. "title" or "user.login"), \`op\` ("containsIgnoreCase" — the only MVP operator), and exactly one of \`value\` (literal scalar) / \`stateKey\` (textField slot, resolved at fetch time). Use \`filter\` for client-side search-style filtering when the GitHub endpoint can't express the predicate as a query param (e.g. text search over issue titles — \`labels\` is server-side, free-text isn't).
+       - \`filter\` — keep only rows from another binding whose \`field\` matches \`value\`. Fields: \`source\` (id of another binding in dataEntries — typically a \`rows\` binding, but filters can chain), \`field\` (dotted path into each row, e.g. "title" or "user.login"), \`op\` ("containsIgnoreCase" — the only filter operator for now; numeric comparisons live in \`sort\` instead), and exactly one of \`value\` (literal scalar) / \`stateKey\` (textField slot, resolved at fetch time). Use \`filter\` for client-side search-style filtering when the GitHub endpoint can't express the predicate as a query param (e.g. text search over issue titles — \`labels\` is server-side, free-text isn't).
+       - \`sort\`   — reorder another binding's rows by a single field. Fields: \`source\` (id of another binding), \`field\` (dotted path), \`direction\` ("asc" | "desc"). Comparison is numeric when both values are finite numbers, else string-coerced. Use \`sort\` when the user asks for an ordering the GitHub endpoint can't express server-side (e.g. \`github.userRepos\` has no "by stars" sort — use a client-side \`sort\` on \`stargazers_count\` desc instead). When the endpoint already supports the requested ordering, prefer the endpoint's own \`sort\` / \`direction\` params over a client-side \`sort\` binding.
+       - \`limit\`  — truncate another binding's rows to at most \`count\` entries — the "top N" primitive. Fields: \`source\` (id of another binding), \`count\` (non-negative integer literal). The source's row order is preserved, so pair this with an endpoint whose response is already ordered usefully (e.g. \`github.repoContributors\` returns contributors by commit count desc, so a \`limit\` over it gives "top N contributors") or stack \`limit\` on top of \`sort\` for "top N by X". Filters, sorts, and limits chain through \`source\` — a \`limit\` whose \`source\` is a \`sort\` whose \`source\` is a \`rows\` binding is the canonical "top N by X" pipeline.
   3. endpointEntries — concrete invocations of catalogued endpoints (id + params + refresh). Each param is { name, value, stateKey } where EXACTLY ONE of \`value\` (literal scalar) and \`stateKey\` (name of a textField slot, read at fetch time) is non-null.
 
 Cross-layer references use string ids and names:
   - uiRootId must equal some componentEntries[*].id
   - childIds[*], childId, tabs[*].childId, and columns[*].cellId must each equal some componentEntries[*].id (when not null)
   - table.rows must equal some dataEntries[*].id
-  - filter binding \`source\` must equal some other dataEntries[*].id (and must not form a cycle)
+  - filter, sort, and limit binding \`source\` must each equal some other dataEntries[*].id (and must not form a cycle)
   - rows binding \`endpoint\` must equal some endpointEntries[*].id
   - endpointEntries[*].call.endpointId must equal a catalogued endpoint id
   - endpoint param \`stateKey\` and filter binding \`stateKey\` must each equal a slot written somewhere in the UI tree — either a \`textField\`'s \`stateKey\`, or an action's \`stateKey\` on a \`button.action\` / \`table.onRowClick\` with kind "setStateAndRefresh"
@@ -743,6 +809,7 @@ GUIDANCE
   - For master-detail layouts ("click a row on the left, show its details on the right"), put a \`row\` (or two cards in a row) at the root with two \`table\`s side by side. The left table sets \`onRowClick\` to { kind: "setStateAndRefresh", stateKey: "<slot>", valueField: "<field on the row, e.g. name>" }. The right table's \`rows\` binding points at an endpoint whose path or query param consumes that slot via \`{ stateKey: "<same slot>" }\`. There is no textField in this pattern — the row click is the input. The renderer detects that the right endpoint's required path param is a state ref into an empty slot and holds the fetch until the user clicks a row; until then the right table sits idle with a "Waiting for <slot>…" placeholder, not an error. The row click writes the slot and bumps the refresh tick, opening the gate.
   - When a textField feeds an endpoint param, give the textField a sensible \`defaultValue\` so the dashboard renders something on mount. Set the matching endpoint param's \`value\` to null and its \`stateKey\` to the textField's stateKey.
   - When the user wants free-text search over rows ("search issues by title pattern", "find repos whose name contains X"), use a \`filter\` binding with op "containsIgnoreCase". The table's \`rows\` then points at the filter binding; the filter's \`source\` points at the underlying \`rows\` binding. The filter's \`stateKey\` matches the search textField. The button's \`refresh\` action re-evaluates the filter at the same time it refetches data — an empty search field matches every row, so omit \`defaultValue\` on the search textField when you want everything visible on mount.
+  - When the user asks for a "top N" / "first N" / "N latest" view, wrap the underlying \`rows\` binding in a \`limit\` with the matching \`count\` and point the table's \`rows\` at the \`limit\`. The source's row order is preserved verbatim, so the order has to come from somewhere. Pick one of, in order of preference: (a) the endpoint already returns the right order — e.g. \`github.repoContributors\` is by commit count desc, so \`limit 3\` is the top 3 contributors; (b) the endpoint exposes a matching \`sort\` / \`direction\` query param — e.g. \`github.userRepos\` with \`sort: "updated"\` + \`limit 10\` is the 10 most recently updated repos; (c) neither (a) nor (b) — wrap the \`rows\` binding in a client-side \`sort\` binding first, then \`limit\` on top of that. The "top 10 repos by stars" case lands in (c): \`github.userRepos\` has no stars sort, so chain \`rows\` → \`sort\` (field "stargazers_count", direction "desc") → \`limit\` (count 10). When neither the endpoint nor a sort field is meaningful for the requested ordering (e.g. "top repos by contributors" — no per-row contributor count on \`github.userRepos\`), say so in \`reply\` and produce the closest faithful approximation rather than inventing data.
   - A button's \`childId\` is typically a \`text\` leaf ("Search", "Refresh", "Load"). For icon-only buttons, point \`childId\` at an \`icon\`.
   - For tables: pick 4–7 useful columns. Column \`field\` is a dotted path into the row object (e.g. "owner.login").
   - Use null for title, justify, align, direction, rowsPath when not needed; the catalogued endpoints return arrays at the top level so rowsPath is usually null.
@@ -919,6 +986,15 @@ function toBinding(
         b.stateKey != null ? { stateKey: b.stateKey } : (b.value as string | number | boolean);
       return { type: "filter", source: b.source, field: b.field, op: b.op, value };
     }
+    case "limit":
+      return { type: "limit", source: b.source, count: b.count };
+    case "sort":
+      return {
+        type: "sort",
+        source: b.source,
+        field: b.field,
+        direction: b.direction,
+      };
   }
 }
 
