@@ -12,6 +12,14 @@
 
 No code generation, no build step, no deploy. The JSON *is* the dashboard.
 
+## Demos
+
+### Open issues — React / Angular / Vue
+
+![Open issues for React, Angular, and Vue rendered as three side-by-side tables](images/react-angular-vue-columns.png)
+
+A `row` of three `table` nodes, each bound to `/repos/{owner}/{repo}/issues` for one of the major JS frameworks — generated from a single prompt and rendered live against the GitHub REST API.
+
 ## The JSON format
 
 The generated document is layered, so each concern stays separable and the LLM can be steered one piece at a time:
