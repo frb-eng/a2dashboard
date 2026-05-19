@@ -439,7 +439,7 @@ press **Apply** again to see everything.
 ## Supported data sources
 
 The endpoint catalog is hardcoded in `server/src/catalog/github.ts`
-and serves two GitHub REST endpoints under `https://api.github.com`.
+and serves three GitHub REST endpoints under `https://api.github.com`.
 Requests can be unauthenticated for public data (60 req/hour) or
 authenticated with a GitHub Personal Access Token via
 `Authorization: Bearer <token>` (5000 req/hour).
@@ -489,13 +489,35 @@ Row fields commonly used in column bindings: `number`, `title`,
 `state`, `html_url`, `user.login`, `comments`, `created_at`,
 `updated_at`.
 
+### `github.repoContributors` — list contributors to a repository
+
+`GET https://api.github.com/repos/{owner}/{repo}/contributors`
+
+Paginated list of contributors to a repository, ordered by commit
+count (descending). Useful for "who wrote this codebase" tables and
+top-contributor leaderboards.
+
+| Param | In | Required | Notes |
+|---|---|---|---|
+| `owner` | path | yes | Repository owner (user or org). |
+| `repo` | path | yes | Repository name. |
+| `anon` | query | no | `1` / `true` to include anonymous contributors (matched by email). |
+| `page` | query | no | Page number (1-based). |
+| `per_page` | query | no | Results per page (max 100). |
+
+Row fields commonly used in column bindings: `login`, `avatar_url`,
+`html_url`, `type` (`User` · `Bot` · `Anonymous`), and `contributions`
+(the commit count). Anonymous contributors (only present when
+`anon` is truthy) carry `name` / `email` instead of `login` and have
+`type: "Anonymous"`.
+
 ## MVP scope
 
 The current implementation is deliberately narrow — just enough surface area to validate the three-layer model end-to-end. Everything else (charts, KPIs, aggregations, more endpoints, alternative renderers) lands as a named extension to this MVP, not by quietly widening it.
 
 - **UI:** the ten primitives listed under [Supported components](#supported-components). Rendered with React + MUI.
 - **Aggregation:** the two bindings listed under [Bindings](#bindings) — `rows` for raw endpoint responses and `filter` (op `containsIgnoreCase`) for client-side text filtering. No `group` / `agg` / `join` / `time-bucket` yet.
-- **Endpoint catalog:** the two GitHub endpoints listed under [Supported data sources](#supported-data-sources). Pagination is the only data-side behavior; refresh policy is `on-mount` or `manual`. Endpoint param values may also be `{ stateKey }` references that resolve against `textField` slots at fetch time, making a button-driven "type → search" dashboard expressible without any code escape hatch.
+- **Endpoint catalog:** the three GitHub endpoints listed under [Supported data sources](#supported-data-sources). Pagination is the only data-side behavior; refresh policy is `on-mount` or `manual`. Endpoint param values may also be `{ stateKey }` references that resolve against `textField` slots at fetch time, making a button-driven "type → search" dashboard expressible without any code escape hatch.
 
 In practice, a small MVP dashboard JSON is a single `table` bound to one of the catalogued endpoints; a richer one composes several tables under a `row`, `column`, `tabs`, or `card`; an interactive one adds a `textField` + `button` row whose state feeds either an endpoint param (refetch on apply) or a `filter` binding (re-narrow on apply).
 

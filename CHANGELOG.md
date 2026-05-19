@@ -6,7 +6,16 @@ release notes per tag.
 
 ## Unreleased
 
-_Nothing yet._
+- **Third catalogued endpoint — `github.repoContributors`.** `GET
+  /repos/{owner}/{repo}/contributors` joins `userRepos` and
+  `repoIssues` in the hardcoded catalog. Paginated, ordered by commit
+  count desc, with optional `anon` to include anonymous contributors.
+  Each row exposes `login`, `avatar_url`, `html_url`, `type`, and
+  `contributions` so the LLM can emit top-contributor leaderboards
+  without inventing fields. The catalog interface is unchanged — just
+  one more `EndpointDefinition` entry — so the prompt grows by exactly
+  the rows of that entry and the OpenAI strict-mode `endpointId` enum
+  picks up the new id automatically.
 
 ## v0.0.2 — Composable, interactive dashboards (2026-05-19)
 

@@ -1,7 +1,7 @@
 /**
  * Hardcoded endpoint catalog — MVP scope.
  *
- * Two GitHub REST endpoints. The catalog is narrow on purpose: a future
+ * Three GitHub REST endpoints. The catalog is narrow on purpose: a future
  * iteration will swap this for OpenAPI ingest per tenant, so the
  * interface stays minimal (id, url template, params, response shape).
  */
@@ -83,6 +83,31 @@ export const githubCatalog: EndpointDefinition[] = [
       { name: "comments",      type: "number" },
       { name: "created_at",    type: "string (iso)" },
       { name: "updated_at",    type: "string (iso)" },
+    ],
+  },
+  {
+    id: "github.repoContributors",
+    method: "GET",
+    urlTemplate: "https://api.github.com/repos/{owner}/{repo}/contributors",
+    description:
+      "Paginated list of contributors to a repository, ordered by number of commits (descending).",
+    params: [
+      { name: "owner",    in: "path",  required: true,  description: "Repository owner (user or org)." },
+      { name: "repo",     in: "path",  required: true,  description: "Repository name." },
+      { name: "anon",     in: "query", required: false, description: "Set to \"1\" or \"true\" to include anonymous contributors (matched by email)." },
+      { name: "page",     in: "query", required: false, description: "Page number (1-based)." },
+      { name: "per_page", in: "query", required: false, description: "Results per page (max 100)." },
+    ],
+    responseIsArray: true,
+    rowFields: [
+      { name: "login",         type: "string (absent for anonymous contributors)" },
+      { name: "id",            type: "number (absent for anonymous contributors)" },
+      { name: "avatar_url",    type: "string (absent for anonymous contributors)" },
+      { name: "html_url",      type: "string (absent for anonymous contributors)" },
+      { name: "type",          type: "string (User | Bot | Anonymous)" },
+      { name: "contributions", type: "number" },
+      { name: "name",          type: "string (anonymous contributors only)" },
+      { name: "email",         type: "string (anonymous contributors only)" },
     ],
   },
 ];
