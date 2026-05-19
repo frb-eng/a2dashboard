@@ -135,6 +135,34 @@ export interface IconNode {
   name: IconName;
 }
 
+export type TextFieldVariant = "shortText" | "longText" | "number" | "obscured";
+
+export interface TextFieldNode {
+  type: "textField";
+  id: string;
+  label: string;
+  /** Slot name written by this field, read by endpoint params via `{ stateKey }`. */
+  stateKey: string;
+  /** Seeds the state slot on mount. When absent, the slot starts empty. */
+  defaultValue?: string;
+  placeholder?: string;
+  variant?: TextFieldVariant;
+}
+
+export type ButtonVariant = "default" | "primary" | "borderless";
+
+/** Declared button action — MVP supports `refresh` only. */
+export type ButtonAction = { kind: "refresh" };
+
+export interface ButtonNode {
+  type: "button";
+  id: string;
+  /** Single child UI node — typically a `text` label or an `icon`. */
+  child: UINode;
+  variant?: ButtonVariant;
+  action: ButtonAction;
+}
+
 export type UINode =
   | TableNode
   | RowNode
@@ -143,7 +171,9 @@ export type UINode =
   | CardNode
   | TabsNode
   | TextNode
-  | IconNode;
+  | IconNode
+  | TextFieldNode
+  | ButtonNode;
 
 export interface RowsBinding {
   type: "rows";
@@ -152,13 +182,41 @@ export interface RowsBinding {
   rowsPath?: string;
 }
 
-export type Binding = RowsBinding;
+/** MVP filter operator. See server spec for the growth path. */
+export type FilterOp = "containsIgnoreCase";
+
+/**
+ * Transforms another binding's rows by keeping only those whose `field`
+ * matches `value`. Evaluated inside `useRows`, so it re-runs on the
+ * dashboard's refresh tick — pressing a `button` with action `refresh`
+ * is the "apply" trigger. Typing into the source `textField` alone does
+ * NOT re-filter.
+ */
+export interface FilterBinding {
+  type: "filter";
+  /** Id of another binding in `Dashboard.data` whose rows we transform. */
+  source: string;
+  field: string;
+  op: FilterOp;
+  value: string | number | boolean | StateRef;
+}
+
+export type Binding = RowsBinding | FilterBinding;
 
 export type RefreshPolicy =
   | { kind: "manual" }
   | { kind: "on-mount" };
 
-export type EndpointParamValue = string | number | boolean;
+/**
+ * Reference to a value held in the shared state map and written by a
+ * `textField` with the matching `stateKey`. Resolved at fetch time, so
+ * the URL is rebuilt against whatever the user has typed.
+ */
+export interface StateRef {
+  stateKey: string;
+}
+
+export type EndpointParamValue = string | number | boolean | StateRef;
 
 export interface EndpointCall {
   endpointId: string;

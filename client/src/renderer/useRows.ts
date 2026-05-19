@@ -5,11 +5,17 @@
  * (fetch once) and `manual` (returns a `refresh` function the UI can
  * wire up). No background polling — that lands when a real use case
  * demands it.
+ *
+ * State-driven refetches: when a `button` with action `refresh` bumps
+ * the shared `refreshTick`, this effect re-runs and rebuilds the URL
+ * against the current `textField` slot values. Typing into a field
+ * alone does NOT refetch — the button is the explicit "go".
  */
 
 import { useCallback, useEffect, useState } from "react";
-import type { Binding, Dashboard, EndpointCall } from "../spec";
+import type { Binding, Dashboard } from "../spec";
 import { fetchRows, loadCatalog } from "./data";
+import { useDashboardState } from "./DashboardStateContext";
 
 export interface RowsState {
   rows: Record<string, unknown>[] | null;
@@ -27,12 +33,9 @@ export function useRows(
   const [error, setError] = useState<string | null>(null);
   const [tick, setTick] = useState(0);
 
-  const refresh = useCallback(() => setTick((t) => t + 1), []);
+  const { getValue, refreshTick } = useDashboardState();
 
-  const call: EndpointCall | undefined = binding
-    ? dashboard.endpoints[binding.endpoint]
-    : undefined;
-  const policy = call?.refresh.kind ?? "on-mount";
+  const refresh = useCallback(() => setTick((t) => t + 1), []);
 
   useEffect(() => {
     if (!binding) return;
@@ -43,7 +46,7 @@ export function useRows(
     (async () => {
       try {
         const catalog = await loadCatalog();
-        const result = await fetchRows(binding, dashboard, catalog);
+        const result = await fetchRows(binding, dashboard, catalog, getValue);
         if (!cancelled) setRows(result);
       } catch (e) {
         if (!cancelled) setError(e instanceof Error ? e.message : String(e));
@@ -55,15 +58,15 @@ export function useRows(
     return () => {
       cancelled = true;
     };
-    // `tick` drives manual refresh; the binding/dashboard identity changes
-    // when a new dashboard is generated.
+    // `tick` drives the local manual refresh button; `refreshTick` drives
+    // dashboard-wide button-triggered refreshes; the binding/dashboard
+    // identity changes when a new dashboard is generated. `getValue` is
+    // read inside the async block — we don't depend on it directly so
+    // keystrokes alone don't refire (a `filter` binding's state ref is
+    // resolved at fetch time, so this is what gives the user the
+    // "button applies the filter" UX).
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [binding, dashboard, tick]);
-
-  // `policy` is currently informational — `on-mount` is implicit in the
-  // effect above and `manual` is honored by exposing `refresh`. Surfaced
-  // here so the caller can decide whether to render a refresh control.
-  void policy;
+  }, [binding, dashboard, tick, refreshTick]);
 
   return { rows, loading, error, refresh };
 }

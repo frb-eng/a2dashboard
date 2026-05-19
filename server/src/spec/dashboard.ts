@@ -35,9 +35,19 @@ export type {
   TextVariant,
   IconNode,
   IconName,
+  TextFieldNode,
+  TextFieldVariant,
+  ButtonNode,
+  ButtonVariant,
+  ButtonAction,
   LayoutJustify,
   LayoutAlign,
   ListDirection,
 } from "./ui.js";
-export type { Binding, RowsBinding } from "./data.js";
-export type { EndpointCall, RefreshPolicy, EndpointParamValue } from "./endpoint.js";
+export type { Binding, RowsBinding, FilterBinding, FilterOp } from "./data.js";
+export type {
+  EndpointCall,
+  RefreshPolicy,
+  EndpointParamValue,
+  StateRef,
+} from "./endpoint.js";

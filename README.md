@@ -247,7 +247,7 @@ ours and the operating cost much higher.
 
 ## Supported components
 
-The renderer ships eight UI primitives. The LLM is told about exactly
+The renderer ships ten UI primitives. The LLM is told about exactly
 these — any request that would require a primitive not listed here is
 refused with a textual reply, rather than faked. Vocabulary is borrowed
 from Google's a2ui basic catalog so a spec written against this
@@ -296,6 +296,145 @@ optional `title`. The fields below are in addition to those.
 `lockOpen` · `mail` · `menu` · `person` · `refresh` · `search` · `send` ·
 `settings` · `share` · `star` · `upload` · `visibility` ·
 `visibilityOff` · `warning`.
+
+### Interactive leaves
+
+Inspired by a2ui's basic-catalog `Button` and `TextField`. These are
+the only primitives in the MVP that produce client-side state — and
+even then no arbitrary code crosses the LLM→client boundary. `button`
+dispatches one of a fixed enum of declared actions; `textField` writes
+to a named state slot that endpoint params can consume.
+
+| Component | What it is | Key fields |
+|---|---|---|
+| `textField` | Labeled text input wired into the dashboard's shared state map. The user-typed value flows into the slot named by `stateKey`; endpoint params declared as `{ stateKey: "<same key>" }` pick it up on the next refresh. `defaultValue` seeds the slot on mount so the dashboard renders something before the user types. Typing alone does **not** refetch — pair with a `button` for the explicit "go". | `label`, `stateKey`, `defaultValue?`, `placeholder?`, `variant` |
+| `button` | Clickable wrapper around a single child node (typically `text` for a labeled button, or `icon` for an icon-only one). Dispatches one of a fixed enum of declared `action`s — never arbitrary code. The MVP action `{ kind: "refresh" }` bumps a shared refresh tick, re-firing every binding using the current state values. New actions land as new spec variants, not as a code escape hatch. | `child`, `variant`, `action` |
+
+`textField variant` ∈ `shortText` · `longText` · `number` · `obscured`.
+`button variant` ∈ `default` · `primary` · `borderless`.
+`button action` ∈ `{ "kind": "refresh" }`.
+
+#### State-bound endpoint params
+
+Endpoint params accept either a literal scalar or a `{ stateKey }`
+reference. The reference resolves at fetch time against the matching
+`textField`'s current value:
+
+```jsonc
+{
+  "ui": {
+    "type": "column",
+    "id": "root",
+    "children": [
+      { "type": "textField", "id": "user_input", "label": "GitHub user",
+        "stateKey": "username", "defaultValue": "octocat", "variant": "shortText" },
+      { "type": "button", "id": "go",
+        "child": { "type": "text", "id": "go_label", "text": "Show repos" },
+        "variant": "primary", "action": { "kind": "refresh" } },
+      { "type": "table", "id": "repos", "rows": "repos_binding",
+        "columns": [
+          { "id": "name",  "header": "Repo",  "field": "full_name" },
+          { "id": "stars", "header": "Stars", "field": "stargazers_count" }
+        ]
+      }
+    ]
+  },
+  "data": {
+    "repos_binding": { "type": "rows", "endpoint": "repos_call" }
+  },
+  "endpoints": {
+    "repos_call": {
+      "endpointId": "github.userRepos",
+      "params": { "username": { "stateKey": "username" } },
+      "refresh": { "kind": "on-mount" }
+    }
+  }
+}
+```
+
+The dashboard renders on mount with `username=octocat`; typing into the
+field updates the slot; clicking the button bumps the refresh tick and
+the table reloads against the new value. No keystroke fetches the
+network on its own — the button is the explicit "go".
+
+## Bindings
+
+The `data` map holds the bindings that produce rows for tables. Each
+binding is a typed primitive — never a free-form expression — so the
+renderer's evaluator stays finite and reviewable. New operators (group
+/ aggregate / join / time-bucket) land as new variants.
+
+| Binding | What it produces | Key fields |
+|---|---|---|
+| `rows` | Raw rows from a catalogued endpoint. The response is treated as the row array, or descended via `rowsPath` when it isn't already an array. | `endpoint` (endpoint entry id), `rowsPath?` |
+| `filter` | Rows from another binding, keeping only those whose `field` matches `value`. Chains: a filter's `source` can itself be another filter. Evaluated inside the same hook as the data fetch, so it re-runs on `button`-triggered refresh — typing alone does NOT re-filter. | `source` (id of another binding), `field` (dotted path), `op`, `value` (literal or `{ stateKey }`) |
+
+`filter op` ∈ `containsIgnoreCase`. Case-insensitive substring match
+against `String(row[field])`. An empty `value` (e.g. an unfilled
+search `textField`) matches every row, so the table shows everything
+on mount when the search field has no `defaultValue`.
+
+### Worked example: search issues in a repo
+
+The user's "search input + Apply button + table of React issues"
+dashboard ties together all the moving parts — a `textField` for the
+query, a `button` whose `refresh` action both re-fetches and
+re-evaluates the filter, a `rows` binding that pulls every open issue
+from `facebook/react`, and a `filter` binding that narrows them by
+title:
+
+```jsonc
+{
+  "ui": {
+    "type": "column",
+    "id": "root",
+    "children": [
+      { "type": "textField", "id": "search_input", "label": "Search issues",
+        "stateKey": "issue_query", "placeholder": "e.g. hydration",
+        "variant": "shortText" },
+      { "type": "button", "id": "apply",
+        "child": { "type": "text", "id": "apply_label", "text": "Apply" },
+        "variant": "primary", "action": { "kind": "refresh" } },
+      { "type": "table", "id": "issues", "rows": "filtered_issues",
+        "columns": [
+          { "id": "number", "header": "#",      "field": "number" },
+          { "id": "title",  "header": "Title",  "field": "title" },
+          { "id": "user",   "header": "Author", "field": "user.login" },
+          { "id": "comments", "header": "Comments", "field": "comments" }
+        ]
+      }
+    ]
+  },
+  "data": {
+    "all_react_issues": { "type": "rows", "endpoint": "react_issues_call" },
+    "filtered_issues":  {
+      "type": "filter",
+      "source": "all_react_issues",
+      "field":  "title",
+      "op":     "containsIgnoreCase",
+      "value":  { "stateKey": "issue_query" }
+    }
+  },
+  "endpoints": {
+    "react_issues_call": {
+      "endpointId": "github.repoIssues",
+      "params": {
+        "owner":    "facebook",
+        "repo":     "react",
+        "state":    "open",
+        "per_page": 100
+      },
+      "refresh": { "kind": "on-mount" }
+    }
+  }
+}
+```
+
+On mount the table shows every open `facebook/react` issue (empty
+search ⇒ filter is a no-op). The user types `hydration`, clicks
+**Apply**, and the table refetches and re-narrows to issues whose
+title matches "hydration" (case-insensitive). Clear the field and
+press **Apply** again to see everything.
 
 ## Supported data sources
 
@@ -354,11 +493,11 @@ Row fields commonly used in column bindings: `number`, `title`,
 
 The current implementation is deliberately narrow — just enough surface area to validate the three-layer model end-to-end. Everything else (charts, KPIs, aggregations, more endpoints, alternative renderers) lands as a named extension to this MVP, not by quietly widening it.
 
-- **UI:** the eight primitives listed under [Supported components](#supported-components). Rendered with React + MUI.
-- **Aggregation:** none — bindings map endpoint response rows directly to table columns.
-- **Endpoint catalog:** the two GitHub endpoints listed under [Supported data sources](#supported-data-sources). Pagination is the only data-side behavior; refresh policy is `on-mount` or `manual`.
+- **UI:** the ten primitives listed under [Supported components](#supported-components). Rendered with React + MUI.
+- **Aggregation:** the two bindings listed under [Bindings](#bindings) — `rows` for raw endpoint responses and `filter` (op `containsIgnoreCase`) for client-side text filtering. No `group` / `agg` / `join` / `time-bucket` yet.
+- **Endpoint catalog:** the two GitHub endpoints listed under [Supported data sources](#supported-data-sources). Pagination is the only data-side behavior; refresh policy is `on-mount` or `manual`. Endpoint param values may also be `{ stateKey }` references that resolve against `textField` slots at fetch time, making a button-driven "type → search" dashboard expressible without any code escape hatch.
 
-In practice, a small MVP dashboard JSON is a single `table` bound to one of the catalogued endpoints; a richer one composes several tables under a `row`, `column`, `tabs`, or `card`.
+In practice, a small MVP dashboard JSON is a single `table` bound to one of the catalogued endpoints; a richer one composes several tables under a `row`, `column`, `tabs`, or `card`; an interactive one adds a `textField` + `button` row whose state feeds either an endpoint param (refetch on apply) or a `filter` binding (re-narrow on apply).
 
 ## Milestones
 
@@ -366,7 +505,18 @@ In practice, a small MVP dashboard JSON is a single `table` bound to one of the 
 
 | Version | Date | Theme | Highlights |
 |---|---|---|---|
+| **[v0.0.2](https://github.com/frb-eng/a2dashboard/releases/tag/v0.0.2)** | 2026-05-19 | Composable, interactive dashboards | Ten a2ui-aligned UI primitives (layout containers, grouping containers, display + interactive leaves) · recursive table cells (any UI node inside any cell) · first aggregation primitive (`filter` op `containsIgnoreCase`) · shared client-side state map driven by `textField`, applied by `button` action `refresh` · LLM emits flat `componentEntries[]` + `uiRootId`, server resolves into the renderer-friendly tree with cycle checks |
 | **[v0.0.1](https://github.com/frb-eng/a2dashboard/releases/tag/v0.0.1)** | 2026-05-18 | Conversational, multi-session iteration | Chat-based iteration that patches (not rewrites) the spec, preserving ids · multiple parallel dashboards switchable from a sidebar, persisted to `localStorage` · assistant can reply textually when a request is ambiguous or needs primitives/endpoints that don't exist yet |
+
+### What v0.0.2 delivers
+
+A user can now describe a *composable, interactive* dashboard — multi-panel layouts, tabs, cards, free-text search with an Apply button — and watch it render live against the GitHub REST API. The renderer's vocabulary grew from one primitive to ten, the data layer gained its first aggregation operator, and dashboards stopped being read-only.
+
+- Ten UI primitives, all aligned with Google's a2ui basic catalog: `table`, `row` / `column` / `list` (layout), `card` / `tabs` (grouping), `text` / `icon` (display leaves), and `textField` / `button` (interactive leaves).
+- Recursive table cells: every `TableColumn` carries either a `field` path or a nested `cell` UI node, so any subtree — including icon-plus-bound-text or stacked-line cells — can live inside any cell. Cell subtrees resolve `field` against the row through a React context.
+- First aggregation primitive — `filter` (op `containsIgnoreCase`). Filters chain through `source`, accept literal or `{ stateKey }` values, and are evaluated inside `useRows` so they re-apply on button-triggered refresh.
+- Shared client-side state map driven by `textField` (writes a slot named by `stateKey`) and consumed by endpoint params and filter bindings declared as `{ stateKey }`. `button` action `refresh` bumps a shared tick and re-fires every binding against the current state — typing alone does NOT refetch.
+- Flat-components intermediate: the LLM emits `componentEntries[]` + `uiRootId` (children referenced by `childIds`, `childId`, `tabs[].childId`, column `cellId`); the server resolves the flat form into the renderer-friendly tree with cycle and dangling-reference checks. Sidesteps OpenAI strict mode's recursive-schema limits.
 
 ### What v0.0.1 delivers
 

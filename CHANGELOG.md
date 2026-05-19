@@ -6,37 +6,94 @@ release notes per tag.
 
 ## Unreleased
 
-### Added
+_Nothing yet._
 
-- **Layout containers.** Three new UI primitives — `row`, `column`,
-  `list` — let the LLM compose several tables in one dashboard
-  (side-by-side, stacked, or scrolled along an axis). The `justify` /
-  `align` / `direction` vocabulary mirrors Google's a2ui basic catalog,
-  and the React renderer reuses the same component-registry pattern
-  found in the a2ui React renderer.
-- **Grouping containers.** Two more primitives — `card` (bordered,
-  elevated single-child wrapper) and `tabs` (switcher between several
-  titled child views) — also lifted from a2ui's basic catalog. `card`
-  takes one `childId`; `tabs` takes `tabs: [{ title, childId }]` and
-  defaults to the first tab on mount.
-- **Display leaves.** Two more a2ui-aligned primitives — `text` (with
-  a typography `variant` ∈ h1…h5 / caption / body, mapped onto MUI's
-  Typography) and `icon` (a curated `name` enum mapped onto
-  `@mui/icons-material` components).
-- **Recursive table cells.** Each `TableColumn` now carries either a
-  `field` path (the existing behavior) or a nested `cell` UI node. When
-  `cell` is set, the renderer wraps the cell subtree in a
-  `RowContext.Provider` so descendant `text` leaves can resolve their
-  `field` against the current row. Closes the a2UI recursion loop: any
-  UI node can live inside any cell.
-- **Flat-components intermediate.** The LLM now emits the UI tree as a
-  flat `componentEntries[] + uiRootId` form (children referenced by
-  `childIds`, `childId`, `tabs[].childId`, or column `cellId`) to dodge
-  recursive-schema limits in OpenAI strict mode. The server resolves it
-  into the renderer-friendly `ui: UINode` tree with inline children,
-  with cycle and dangling-reference checks. Shared sub-trees (e.g. one
-  cell component reused across columns) resolve independently and do
-  not trip cycle detection.
+## v0.0.2 — Composable, interactive dashboards (2026-05-19)
+
+Second tagged milestone. The renderer's vocabulary grows from one
+primitive (`table`) to ten, the data layer gains its first aggregation
+operator, and dashboards become *interactive*: the LLM can now emit a
+spec the user can type into and apply, not just one they read. Same
+three-layer model, same prompt-to-live-dashboard loop — wider surface
+area, exercised end-to-end.
+
+### Highlights
+
+- **Ten UI primitives, all a2ui-aligned.** Layout containers `row` /
+  `column` / `list` compose tables side-by-side, stacked, or scrolled
+  along an axis (`justify` / `align` / `direction` from a2ui's basic
+  catalog). Grouping containers `card` (bordered, elevated,
+  single-child) and `tabs` (titled switcher, first tab active on
+  mount) wrap subtrees. Display leaves `text` (typography variant
+  `h1`…`h5` / `caption` / `body`, mapped to MUI Typography) and `icon`
+  (curated `name` enum, mapped to `@mui/icons-material`) fill out the
+  basic-catalog surface. The renderer keeps the registry pattern from
+  the a2ui React renderer: one map of `type` → component, no
+  per-primitive logic in the dispatch path.
+- **Recursive table cells.** Each `TableColumn` carries either a
+  `field` path *or* a nested `cell` UI node. When `cell` is set, the
+  renderer wraps the subtree in a `RowContext.Provider` so descendant
+  `text` leaves resolve their `field` against the current row.
+  Closes the a2UI recursion loop: any node can live inside any cell,
+  enabling icon-plus-bound-text cells, multi-line cells, etc.
+- **Interactive leaves — `textField` and `button`.** Inspired by
+  a2ui's basic-catalog `TextField` and `Button`. `textField` writes
+  user input to a slot named by `stateKey` in a shared client-side
+  state map; endpoint params and filter bindings declared as
+  `{ stateKey }` consume those slots at fetch time. `button`
+  dispatches one of a fixed enum of declared actions (MVP:
+  `{ kind: "refresh" }`), which bumps a shared refresh tick and
+  re-fires every binding against the current state. No arbitrary code
+  crosses the LLM→client boundary — new actions land as new spec
+  variants. Typing alone does NOT refetch: the button stays the
+  explicit "go". State persists across turn-by-turn patches so the
+  user's typed values survive iteration; switching sessions resets
+  it.
+- **First aggregation primitive — `filter`.** The data layer is no
+  longer "just `rows`". A typed `filter` binding (`{ source, field,
+  op, value }`) keeps only rows from another binding whose `field`
+  matches `value`, where `value` is either a literal or a
+  `{ stateKey }` ref so a `textField` can drive the predicate. MVP
+  op is `containsIgnoreCase`; future ops (equals / gt / in / etc.)
+  land as new enum values, never as free-form expressions. Filters
+  chain through `source`; cycles and dangling references are caught
+  in the renderer's aggregation engine. Unlocks the canonical
+  "search input + Apply button + table" dashboard end-to-end (e.g.
+  "issue-search dashboard for react repo").
+- **Flat-components intermediate.** The LLM now emits the UI tree as
+  a flat `componentEntries[]` + `uiRootId` form (children referenced
+  by `childIds`, `childId`, `tabs[].childId`, or column `cellId`) to
+  dodge recursive-schema limits in OpenAI strict mode. The server
+  resolves it into the renderer-friendly `ui: UINode` tree with
+  inline children, with cycle and dangling-reference checks. Shared
+  sub-trees (e.g. one cell component reused across columns) resolve
+  independently and do not trip cycle detection.
+
+### Scope (still intentionally narrow)
+
+- UI vocabulary: exactly ten primitives — `table`, `row`, `column`,
+  `list`, `card`, `tabs`, `text`, `icon`, `textField`, `button`. No
+  charts, KPIs, sliders, selects, or check primitives yet. Requests
+  that need any of these are still refused with a textual reply
+  rather than faked.
+- Aggregation: one operator (`containsIgnoreCase`) on one binding
+  variant (`filter`). No `group` / `agg` / `join` / `time-bucket`
+  yet.
+- Endpoint catalog: same two GitHub endpoints as v0.0.1
+  (`/users/{u}/repos`, `/repos/{o}/{r}/issues`). Per-tenant OpenAPI
+  ingest is still on the roadmap.
+- Button actions: one (`refresh`). Per-binding refresh, navigation,
+  and submit semantics land as new switch arms when use cases demand.
+
+### Known gaps to address next
+
+- More aggregation operators (`equals` / `gt` / `in` / `group` /
+  `agg` / `join` / `time-bucket`).
+- More UI primitives (chart, KPI tile, slider, select, checkbox)
+  for dashboards that aren't tabular.
+- More button actions (refresh-one, navigate, submit).
+- User-registered endpoints via OpenAPI ingest, so the catalog
+  stops being hardcoded.
 
 ## v0.0.1 — Conversational, multi-session iteration (2026-05-18)
 
