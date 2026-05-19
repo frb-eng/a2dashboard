@@ -222,7 +222,16 @@ export type Binding = RowsBinding | FilterBinding;
 
 export type RefreshPolicy =
   | { kind: "manual" }
-  | { kind: "on-mount" };
+  | { kind: "on-mount" }
+  /**
+   * Gate the fetch on the named state slots being populated. Until every
+   * slot in `stateKeys` resolves to a non-empty value, the binding sits
+   * idle — no fetch, no error. Used for the master-detail right panel
+   * so it does not blow up on mount with "missing path param" before the
+   * user has picked a row; once `setStateAndRefresh` writes the slot and
+   * bumps the refresh tick, the gate opens and the fetch proceeds.
+   */
+  | { kind: "when-state-set"; stateKeys: string[] };
 
 /**
  * Reference to a value held in the shared state map and written by a
