@@ -247,7 +247,7 @@ ours and the operating cost much higher.
 
 ## Supported components
 
-The renderer ships eight UI primitives. The LLM is told about exactly
+The renderer ships ten UI primitives. The LLM is told about exactly
 these — any request that would require a primitive not listed here is
 refused with a textual reply, rather than faked. Vocabulary is borrowed
 from Google's a2ui basic catalog so a spec written against this
@@ -296,6 +296,66 @@ optional `title`. The fields below are in addition to those.
 `lockOpen` · `mail` · `menu` · `person` · `refresh` · `search` · `send` ·
 `settings` · `share` · `star` · `upload` · `visibility` ·
 `visibilityOff` · `warning`.
+
+### Interactive leaves
+
+Inspired by a2ui's basic-catalog `Button` and `TextField`. These are
+the only primitives in the MVP that produce client-side state — and
+even then no arbitrary code crosses the LLM→client boundary. `button`
+dispatches one of a fixed enum of declared actions; `textField` writes
+to a named state slot that endpoint params can consume.
+
+| Component | What it is | Key fields |
+|---|---|---|
+| `textField` | Labeled text input wired into the dashboard's shared state map. The user-typed value flows into the slot named by `stateKey`; endpoint params declared as `{ stateKey: "<same key>" }` pick it up on the next refresh. `defaultValue` seeds the slot on mount so the dashboard renders something before the user types. Typing alone does **not** refetch — pair with a `button` for the explicit "go". | `label`, `stateKey`, `defaultValue?`, `placeholder?`, `variant` |
+| `button` | Clickable wrapper around a single child node (typically `text` for a labeled button, or `icon` for an icon-only one). Dispatches one of a fixed enum of declared `action`s — never arbitrary code. The MVP action `{ kind: "refresh" }` bumps a shared refresh tick, re-firing every binding using the current state values. New actions land as new spec variants, not as a code escape hatch. | `child`, `variant`, `action` |
+
+`textField variant` ∈ `shortText` · `longText` · `number` · `obscured`.
+`button variant` ∈ `default` · `primary` · `borderless`.
+`button action` ∈ `{ "kind": "refresh" }`.
+
+#### State-bound endpoint params
+
+Endpoint params accept either a literal scalar or a `{ stateKey }`
+reference. The reference resolves at fetch time against the matching
+`textField`'s current value:
+
+```jsonc
+{
+  "ui": {
+    "type": "column",
+    "id": "root",
+    "children": [
+      { "type": "textField", "id": "user_input", "label": "GitHub user",
+        "stateKey": "username", "defaultValue": "octocat", "variant": "shortText" },
+      { "type": "button", "id": "go",
+        "child": { "type": "text", "id": "go_label", "text": "Show repos" },
+        "variant": "primary", "action": { "kind": "refresh" } },
+      { "type": "table", "id": "repos", "rows": "repos_binding",
+        "columns": [
+          { "id": "name",  "header": "Repo",  "field": "full_name" },
+          { "id": "stars", "header": "Stars", "field": "stargazers_count" }
+        ]
+      }
+    ]
+  },
+  "data": {
+    "repos_binding": { "type": "rows", "endpoint": "repos_call" }
+  },
+  "endpoints": {
+    "repos_call": {
+      "endpointId": "github.userRepos",
+      "params": { "username": { "stateKey": "username" } },
+      "refresh": { "kind": "on-mount" }
+    }
+  }
+}
+```
+
+The dashboard renders on mount with `username=octocat`; typing into the
+field updates the slot; clicking the button bumps the refresh tick and
+the table reloads against the new value. No keystroke fetches the
+network on its own — the button is the explicit "go".
 
 ## Supported data sources
 
@@ -354,11 +414,11 @@ Row fields commonly used in column bindings: `number`, `title`,
 
 The current implementation is deliberately narrow — just enough surface area to validate the three-layer model end-to-end. Everything else (charts, KPIs, aggregations, more endpoints, alternative renderers) lands as a named extension to this MVP, not by quietly widening it.
 
-- **UI:** the eight primitives listed under [Supported components](#supported-components). Rendered with React + MUI.
+- **UI:** the ten primitives listed under [Supported components](#supported-components). Rendered with React + MUI.
 - **Aggregation:** none — bindings map endpoint response rows directly to table columns.
-- **Endpoint catalog:** the two GitHub endpoints listed under [Supported data sources](#supported-data-sources). Pagination is the only data-side behavior; refresh policy is `on-mount` or `manual`.
+- **Endpoint catalog:** the two GitHub endpoints listed under [Supported data sources](#supported-data-sources). Pagination is the only data-side behavior; refresh policy is `on-mount` or `manual`. Endpoint param values may also be `{ stateKey }` references that resolve against `textField` slots at fetch time, making a button-driven "type → search" dashboard expressible without any code escape hatch.
 
-In practice, a small MVP dashboard JSON is a single `table` bound to one of the catalogued endpoints; a richer one composes several tables under a `row`, `column`, `tabs`, or `card`.
+In practice, a small MVP dashboard JSON is a single `table` bound to one of the catalogued endpoints; a richer one composes several tables under a `row`, `column`, `tabs`, or `card`; an interactive one adds a `textField` + `button` row whose state feeds the endpoint params.
 
 ## Milestones
 

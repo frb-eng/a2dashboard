@@ -8,6 +8,18 @@ release notes per tag.
 
 ### Added
 
+- **Interactive leaves.** Two new UI primitives — `textField` and
+  `button` — inspired by a2ui's basic-catalog `TextField` and `Button`,
+  let the LLM build interactive dashboards (e.g. "type a GitHub user,
+  click Show, see their repos") without any code escape hatch.
+  `textField` writes user input to a named slot in a shared client-side
+  state map; endpoint params declared as `{ stateKey }` consume those
+  slots at fetch time. `button` dispatches one of a fixed enum of
+  declared actions (MVP: `{ kind: "refresh" }`), which bumps a shared
+  refresh tick and re-fires every binding against the current state.
+  Typing alone does NOT refetch — the button is the explicit "go".
+  State persists across turn-by-turn patches so the user's typed values
+  survive iteration; switching sessions resets it.
 - **Layout containers.** Three new UI primitives — `row`, `column`,
   `list` — let the LLM compose several tables in one dashboard
   (side-by-side, stacked, or scrolled along an axis). The `justify` /

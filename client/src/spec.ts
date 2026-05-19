@@ -135,6 +135,34 @@ export interface IconNode {
   name: IconName;
 }
 
+export type TextFieldVariant = "shortText" | "longText" | "number" | "obscured";
+
+export interface TextFieldNode {
+  type: "textField";
+  id: string;
+  label: string;
+  /** Slot name written by this field, read by endpoint params via `{ stateKey }`. */
+  stateKey: string;
+  /** Seeds the state slot on mount. When absent, the slot starts empty. */
+  defaultValue?: string;
+  placeholder?: string;
+  variant?: TextFieldVariant;
+}
+
+export type ButtonVariant = "default" | "primary" | "borderless";
+
+/** Declared button action — MVP supports `refresh` only. */
+export type ButtonAction = { kind: "refresh" };
+
+export interface ButtonNode {
+  type: "button";
+  id: string;
+  /** Single child UI node — typically a `text` label or an `icon`. */
+  child: UINode;
+  variant?: ButtonVariant;
+  action: ButtonAction;
+}
+
 export type UINode =
   | TableNode
   | RowNode
@@ -143,7 +171,9 @@ export type UINode =
   | CardNode
   | TabsNode
   | TextNode
-  | IconNode;
+  | IconNode
+  | TextFieldNode
+  | ButtonNode;
 
 export interface RowsBinding {
   type: "rows";
@@ -158,7 +188,16 @@ export type RefreshPolicy =
   | { kind: "manual" }
   | { kind: "on-mount" };
 
-export type EndpointParamValue = string | number | boolean;
+/**
+ * Reference to a value held in the shared state map and written by a
+ * `textField` with the matching `stateKey`. Resolved at fetch time, so
+ * the URL is rebuilt against whatever the user has typed.
+ */
+export interface StateRef {
+  stateKey: string;
+}
+
+export type EndpointParamValue = string | number | boolean | StateRef;
 
 export interface EndpointCall {
   endpointId: string;

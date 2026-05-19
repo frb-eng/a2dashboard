@@ -2,17 +2,23 @@
  * a2UI layer — declarative UI tree.
  *
  * Vocabulary:
- *   - `table`   — data-producing container (renders rows from a binding).
- *                 Cells can hold either a raw field path or an arbitrary
- *                 nested UI node — see `TableColumn`.
- *   - `row`     — horizontal flex layout container.
- *   - `column`  — vertical flex layout container.
- *   - `list`    — uniform flex layout with a configurable axis.
- *   - `card`    — bordered/elevated single-child container with optional title.
- *   - `tabs`    — switcher between several titled child views.
- *   - `text`    — display leaf for plain or row-bound text with a variant hint.
- *   - `icon`    — display leaf for a named glyph from a curated set
- *                 mirroring a2ui's basic-catalog icon enum.
+ *   - `table`     — data-producing container (renders rows from a binding).
+ *                   Cells can hold either a raw field path or an arbitrary
+ *                   nested UI node — see `TableColumn`.
+ *   - `row`       — horizontal flex layout container.
+ *   - `column`    — vertical flex layout container.
+ *   - `list`      — uniform flex layout with a configurable axis.
+ *   - `card`      — bordered/elevated single-child container with optional title.
+ *   - `tabs`      — switcher between several titled child views.
+ *   - `text`      — display leaf for plain or row-bound text with a variant hint.
+ *   - `icon`      — display leaf for a named glyph from a curated set
+ *                   mirroring a2ui's basic-catalog icon enum.
+ *   - `textField` — text input that writes to a named state slot. Endpoint
+ *                   params can read that slot via `{ stateKey }` so the
+ *                   dashboard re-fetches with user-supplied values.
+ *   - `button`    — clickable wrapper around a child component (typically
+ *                   a `text` or `icon`) that triggers a declared `action`.
+ *                   MVP action: `refresh`, which re-fires every binding.
  *
  * The renderer executes only what is named here, and the LLM is told only
  * what is named here — these two stay in lockstep.
@@ -190,6 +196,60 @@ export interface IconNode {
   name: IconName;
 }
 
+/**
+ * Text-input variant hint. Mirrors a2ui's basic-catalog `TextField.variant`
+ * enum; the renderer maps each value onto MUI's `TextField` props
+ * (multiline / `type=number` / `type=password` / default single-line).
+ */
+export type TextFieldVariant = "shortText" | "longText" | "number" | "obscured";
+
+export interface TextFieldNode {
+  type: "textField";
+  id: string;
+  /** Label rendered next to / above the input. */
+  label: string;
+  /**
+   * Name of the state slot this field writes to. Endpoint param values
+   * reference the same key via `{ stateKey }` to consume the typed value.
+   * State is shared across the dashboard tree, so several inputs can write
+   * to one slot or several endpoints can read from one input.
+   */
+  stateKey: string;
+  /**
+   * Optional initial value used to seed the state slot on mount. When
+   * absent, the slot is empty until the user types.
+   */
+  defaultValue?: string;
+  /** Optional placeholder shown when the field is empty. */
+  placeholder?: string;
+  variant?: TextFieldVariant;
+}
+
+/** Button style hint. Mirrors a2ui's basic-catalog `Button.variant` enum. */
+export type ButtonVariant = "default" | "primary" | "borderless";
+
+/**
+ * Declared button action. The renderer dispatches one of a fixed set —
+ * no arbitrary code crosses the LLM→client boundary.
+ *
+ *  - `refresh` — bump the dashboard's refresh tick so every binding refetches
+ *                with the latest state values (i.e. whatever's in the
+ *                TextField slots). Single MVP action.
+ */
+export type ButtonAction = { kind: "refresh" };
+
+export interface ButtonNode {
+  type: "button";
+  id: string;
+  /**
+   * The single UI node rendered inside the button — typically a `text`
+   * leaf for a labeled button or an `icon` leaf for an icon-only button.
+   */
+  child: UINode;
+  variant?: ButtonVariant;
+  action: ButtonAction;
+}
+
 /** Discriminated union over every UI primitive. */
 export type UINode =
   | TableNode
@@ -199,4 +259,6 @@ export type UINode =
   | CardNode
   | TabsNode
   | TextNode
-  | IconNode;
+  | IconNode
+  | TextFieldNode
+  | ButtonNode;

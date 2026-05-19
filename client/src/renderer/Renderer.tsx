@@ -18,6 +18,9 @@ import { CardRenderer } from "./components/Card";
 import { TabsRenderer } from "./components/Tabs";
 import { TextRenderer } from "./components/Text";
 import { IconRenderer } from "./components/Icon";
+import { TextFieldRenderer } from "./components/TextField";
+import { ButtonRenderer } from "./components/Button";
+import { DashboardStateProvider } from "./DashboardStateContext";
 
 register("table", TableRenderer);
 register("row", RowRenderer);
@@ -27,11 +30,21 @@ register("card", CardRenderer);
 register("tabs", TabsRenderer);
 register("text", TextRenderer);
 register("icon", IconRenderer);
+register("textField", TextFieldRenderer);
+register("button", ButtonRenderer);
 
 interface RendererProps {
   dashboard: Dashboard;
 }
 
 export function Renderer({ dashboard }: RendererProps) {
-  return <NodeRenderer node={dashboard.ui} dashboard={dashboard} />;
+  // The provider holds the textField slot map and refresh tick. Slots
+  // persist across turn-by-turn patches so the user's typed values
+  // survive iteration; the parent (DashboardView) keys this whole subtree
+  // by session id so switching sessions does reset state.
+  return (
+    <DashboardStateProvider root={dashboard.ui}>
+      <NodeRenderer node={dashboard.ui} dashboard={dashboard} />
+    </DashboardStateProvider>
+  );
 }
