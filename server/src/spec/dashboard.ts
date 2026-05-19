@@ -50,6 +50,8 @@ export type {
   FilterBinding,
   FilterOp,
   LimitBinding,
+  SortBinding,
+  SortDirection,
 } from "./data.js";
 export type {
   EndpointCall,

@@ -75,7 +75,33 @@ export interface LimitBinding {
 }
 
 /**
+ * Sort direction for the `sort` binding. New directions land as new enum
+ * values + matching evaluator branches — same discipline as `FilterOp`.
+ */
+export type SortDirection = "asc" | "desc";
+
+/**
+ * Reorders another binding's rows by a single field. Pure ordering — no
+ * filtering, no truncation — so chaining with `limit` is the natural
+ * "top N by X" pattern (e.g. sort repos by `stargazers_count` desc,
+ * then limit to 10).
+ *
+ * Comparison is numeric when both values are finite numbers, else
+ * string-coerced (case-sensitive) — the same rule any reviewer would
+ * write by hand. Rows with `null` / `undefined` at `field` sort to the
+ * end regardless of direction.
+ */
+export interface SortBinding {
+  type: "sort";
+  /** Id of another binding in `Dashboard.data` whose rows we reorder. */
+  source: string;
+  /** Dotted path into each row identifying the field to sort by. */
+  field: string;
+  direction: SortDirection;
+}
+
+/**
  * Discriminated union over every binding kind. Add a variant + its
  * evaluator branch together; never both ends in separate changes.
  */
-export type Binding = RowsBinding | FilterBinding | LimitBinding;
+export type Binding = RowsBinding | FilterBinding | LimitBinding | SortBinding;

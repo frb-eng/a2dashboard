@@ -26,6 +26,7 @@ import type {
   FilterBinding,
   LimitBinding,
   RowsBinding,
+  SortBinding,
 } from "../spec";
 
 /**
@@ -178,6 +179,37 @@ async function fetchRowsBinding(
   return rows as Record<string, unknown>[];
 }
 
+function compareDefined(a: unknown, b: unknown): number {
+  if (typeof a === "number" && typeof b === "number" &&
+      Number.isFinite(a) && Number.isFinite(b)) {
+    return a - b;
+  }
+  const sa = String(a);
+  const sb = String(b);
+  if (sa < sb) return -1;
+  if (sa > sb) return 1;
+  return 0;
+}
+
+function applySort(
+  rows: Record<string, unknown>[],
+  binding: SortBinding,
+): Record<string, unknown>[] {
+  const sign = binding.direction === "desc" ? -1 : 1;
+  return [...rows].sort((ra, rb) => {
+    const va = readPath(ra, binding.field);
+    const vb = readPath(rb, binding.field);
+    // Missing values sort to the end regardless of direction — the
+    // useful default for "top N by X" tables.
+    const aMissing = va == null;
+    const bMissing = vb == null;
+    if (aMissing && bMissing) return 0;
+    if (aMissing) return 1;
+    if (bMissing) return -1;
+    return sign * compareDefined(va, vb);
+  });
+}
+
 function applyLimit(
   rows: Record<string, unknown>[],
   binding: LimitBinding,
@@ -279,6 +311,32 @@ export async function fetchRows(
           visiting,
         );
         return applyLimit(upstream, binding);
+      } finally {
+        visiting.delete(binding.source);
+      }
+    }
+    case "sort": {
+      const source = dashboard.data[binding.source];
+      if (!source) {
+        throw new Error(
+          `Sort binding references unknown source id "${binding.source}".`,
+        );
+      }
+      if (visiting.has(binding.source)) {
+        throw new Error(
+          `Binding cycle detected at sort source "${binding.source}".`,
+        );
+      }
+      visiting.add(binding.source);
+      try {
+        const upstream = await fetchRows(
+          source,
+          dashboard,
+          catalog,
+          resolveState,
+          visiting,
+        );
+        return applySort(upstream, binding);
       } finally {
         visiting.delete(binding.source);
       }

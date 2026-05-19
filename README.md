@@ -440,13 +440,16 @@ renderer's evaluator stays finite and reviewable. New operators (group
 | Binding | What it produces | Key fields |
 |---|---|---|
 | `rows` | Raw rows from a catalogued endpoint. The response is treated as the row array, or descended via `rowsPath` when it isn't already an array. | `endpoint` (endpoint entry id), `rowsPath?` |
-| `filter` | Rows from another binding, keeping only those whose `field` matches `value`. Chains: a filter's `source` can itself be another filter or a `limit`. Evaluated inside the same hook as the data fetch, so it re-runs on `button`-triggered refresh — typing alone does NOT re-filter. | `source` (id of another binding), `field` (dotted path), `op`, `value` (literal or `{ stateKey }`) |
-| `limit` | The first `count` rows of another binding — the "top N" primitive. The source's row order is preserved verbatim, so pair `limit` with an endpoint whose response is already usefully ordered (e.g. `github.repoContributors` returns contributors by commit count desc, so a `limit` over it is the natural "top N contributors"). Chains: a `limit` can wrap a `filter` ("top N of the filtered rows") or another `limit`. | `source` (id of another binding), `count` (non-negative integer) |
+| `filter` | Rows from another binding, keeping only those whose `field` matches `value`. Chains: a filter's `source` can itself be another filter, `sort`, or `limit`. Evaluated inside the same hook as the data fetch, so it re-runs on `button`-triggered refresh — typing alone does NOT re-filter. | `source` (id of another binding), `field` (dotted path), `op`, `value` (literal or `{ stateKey }`) |
+| `sort` | Rows from another binding, reordered by a single `field`. Comparison is numeric when both values are finite numbers, else string-coerced (case-sensitive); `null` / `undefined` sort to the end regardless of direction. Use for orderings the endpoint can't express server-side — e.g. `github.userRepos` has no "by stars" sort, so a client-side `sort` on `stargazers_count` desc + a `limit` is the "top N by stars" pattern. | `source` (id of another binding), `field` (dotted path), `direction` (`asc` / `desc`) |
+| `limit` | The first `count` rows of another binding — the "top N" primitive. The source's row order is preserved verbatim, so pair `limit` with an endpoint whose response is already usefully ordered (e.g. `github.repoContributors` returns contributors by commit count desc) or stack `limit` on top of `sort` for "top N by X". Chains freely: `limit` over `sort` over `filter` over `rows` is the canonical filtered-and-sorted-top-N pipeline. | `source` (id of another binding), `count` (non-negative integer) |
 
 `filter op` ∈ `containsIgnoreCase`. Case-insensitive substring match
 against `String(row[field])`. An empty `value` (e.g. an unfilled
 search `textField`) matches every row, so the table shows everything
 on mount when the search field has no `defaultValue`.
+
+`sort direction` ∈ `asc` · `desc`.
 
 ### Worked example: search issues in a repo
 
@@ -590,7 +593,7 @@ Row fields commonly used in column bindings: `login`, `avatar_url`,
 The current implementation is deliberately narrow — just enough surface area to validate the three-layer model end-to-end. Everything else (charts, KPIs, aggregations, more endpoints, alternative renderers) lands as a named extension to this MVP, not by quietly widening it.
 
 - **UI:** the ten primitives listed under [Supported components](#supported-components). Rendered with React + MUI.
-- **Aggregation:** the three bindings listed under [Bindings](#bindings) — `rows` for raw endpoint responses, `filter` (op `containsIgnoreCase`) for client-side text filtering, and `limit` for "top N" truncation over an already-ordered source. No `group` / `agg` / `join` / `time-bucket` yet.
+- **Aggregation:** the four bindings listed under [Bindings](#bindings) — `rows` for raw endpoint responses, `filter` (op `containsIgnoreCase`) for client-side text filtering, `sort` for client-side ordering by a row field, and `limit` for "top N" truncation. No `group` / `agg` / `join` / `time-bucket` yet.
 - **Endpoint catalog:** the three GitHub endpoints listed under [Supported data sources](#supported-data-sources). Pagination is the only data-side behavior; refresh policy is `on-mount` or `manual`. Endpoint param values may also be `{ stateKey }` references that resolve against shared state slots at fetch time — slots are written by `textField` keystrokes or by `setStateAndRefresh` actions fired from buttons or row clicks — making a button-driven "type → search" or click-driven "select → detail" dashboard expressible without any code escape hatch. The renderer holds a fetch when a *required* catalog param (e.g. `repo` on `github.repoContributors`) is bound to a `{ stateKey }` whose slot is empty — the master-detail right panel sits idle until the row click writes the slot, instead of throwing "missing path param".
 
 In practice, a small MVP dashboard JSON is a single `table` bound to one of the catalogued endpoints; a richer one composes several tables under a `row`, `column`, `tabs`, or `card`; an interactive one adds a `textField` + `button` row whose state feeds either an endpoint param (refetch on apply) or a `filter` binding (re-narrow on apply); a master-detail one gives a `table` an `onRowClick: setStateAndRefresh` action and points a second table's endpoint param at the same slot.

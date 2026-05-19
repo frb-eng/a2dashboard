@@ -233,7 +233,23 @@ export interface LimitBinding {
   count: number;
 }
 
-export type Binding = RowsBinding | FilterBinding | LimitBinding;
+export type SortDirection = "asc" | "desc";
+
+/**
+ * Reorders another binding's rows by a single field. Pure ordering;
+ * chain with `limit` for the natural "top N by X" pattern. Comparison
+ * is numeric when both values are finite numbers, else string-coerced;
+ * `null` / `undefined` sort to the end regardless of direction.
+ */
+export interface SortBinding {
+  type: "sort";
+  /** Id of another binding in `Dashboard.data` whose rows we reorder. */
+  source: string;
+  field: string;
+  direction: SortDirection;
+}
+
+export type Binding = RowsBinding | FilterBinding | LimitBinding | SortBinding;
 
 export type RefreshPolicy =
   | { kind: "manual" }
