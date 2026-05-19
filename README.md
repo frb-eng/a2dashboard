@@ -14,6 +14,12 @@ No code generation, no build step, no deploy. The JSON *is* the dashboard.
 
 ## Demos
 
+### Next.js — open issues
+
+![Open issues for vercel/next.js rendered as a single table with title, author, and comment count columns](images/nextjs-open-issues.png)
+
+A single `table` bound to `/repos/vercel/next.js/issues`, refined turn-by-turn from the chat panel — each follow-up patches the existing spec instead of regenerating it.
+
 ### Open issues — React / Angular / Vue
 
 ![Open issues for React, Angular, and Vue rendered as three side-by-side tables](images/react-angular-vue-columns.png)
