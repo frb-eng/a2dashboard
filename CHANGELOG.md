@@ -4,6 +4,40 @@ All notable releases of `a2dashboard` are listed here. The README's
 Milestones table is the short-form view; this file holds the full
 release notes per tag.
 
+## Unreleased
+
+### Added
+
+- **Layout containers.** Three new UI primitives — `row`, `column`,
+  `list` — let the LLM compose several tables in one dashboard
+  (side-by-side, stacked, or scrolled along an axis). The `justify` /
+  `align` / `direction` vocabulary mirrors Google's a2ui basic catalog,
+  and the React renderer reuses the same component-registry pattern
+  found in the a2ui React renderer.
+- **Grouping containers.** Two more primitives — `card` (bordered,
+  elevated single-child wrapper) and `tabs` (switcher between several
+  titled child views) — also lifted from a2ui's basic catalog. `card`
+  takes one `childId`; `tabs` takes `tabs: [{ title, childId }]` and
+  defaults to the first tab on mount.
+- **Display leaves.** Two more a2ui-aligned primitives — `text` (with
+  a typography `variant` ∈ h1…h5 / caption / body, mapped onto MUI's
+  Typography) and `icon` (a curated `name` enum mapped onto
+  `@mui/icons-material` components).
+- **Recursive table cells.** Each `TableColumn` now carries either a
+  `field` path (the existing behavior) or a nested `cell` UI node. When
+  `cell` is set, the renderer wraps the cell subtree in a
+  `RowContext.Provider` so descendant `text` leaves can resolve their
+  `field` against the current row. Closes the a2UI recursion loop: any
+  UI node can live inside any cell.
+- **Flat-components intermediate.** The LLM now emits the UI tree as a
+  flat `componentEntries[] + uiRootId` form (children referenced by
+  `childIds`, `childId`, `tabs[].childId`, or column `cellId`) to dodge
+  recursive-schema limits in OpenAI strict mode. The server resolves it
+  into the renderer-friendly `ui: UINode` tree with inline children,
+  with cycle and dangling-reference checks. Shared sub-trees (e.g. one
+  cell component reused across columns) resolve independently and do
+  not trip cycle detection.
+
 ## v0.0.1 — Conversational, multi-session iteration (2026-05-18)
 
 First tagged milestone. The end-to-end loop works: a user describes a

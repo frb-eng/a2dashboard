@@ -12,6 +12,20 @@
 
 No code generation, no build step, no deploy. The JSON *is* the dashboard.
 
+## Demos
+
+### Next.js — open issues
+
+![Open issues for vercel/next.js rendered as a single table with title, author, and comment count columns](images/nextjs-open-issues.png)
+
+A single `table` bound to `/repos/vercel/next.js/issues`, refined turn-by-turn from the chat panel — each follow-up patches the existing spec instead of regenerating it.
+
+### Open issues — React / Angular / Vue
+
+![Open issues for React, Angular, and Vue rendered as three side-by-side tables](images/react-angular-vue-columns.png)
+
+A `row` of three `table` nodes, each bound to `/repos/{owner}/{repo}/issues` for one of the major JS frameworks — generated from a single prompt and rendered live against the GitHub REST API.
+
 ## The JSON format
 
 The generated document is layered, so each concern stays separable and the LLM can be steered one piece at a time:
@@ -117,16 +131,125 @@ flowchart TB
 
 ## Why declarative JSON, not generated code?
 
-- **Safe** — no arbitrary code is shipped to the browser; the renderer only executes a fixed vocabulary of UI and aggregation primitives.
-- **Iterable** — the user can refine the dashboard ("make the chart stacked", "add a 7-day moving average") and the LLM patches the JSON instead of rewriting an app.
-- **Portable** — the same JSON can be rendered by any client that implements a2UI; the server doesn't care which.
-- **Inspectable** — every panel is traceable back to an endpoint, a query, and an aggregation.
+Two reasonable shapes for an LLM-driven dashboard tool: have the model
+emit a **declarative spec** (our approach) or have it **generate code**
+(a React file, say) that you build and serve. The trade-offs run in
+opposite directions; here is the honest comparison.
+
+### Our approach — LLM emits a declarative JSON spec
+
+The model writes a small JSON document against a fixed vocabulary. The
+renderer executes only that vocabulary at runtime.
+
+**Pros**
+
+- **Safe by construction.** No arbitrary code crosses the LLM→client
+  boundary. The renderer only invokes a registered set of primitives.
+  No eval, no dynamic import, no sandbox to maintain.
+- **Iterable.** The LLM patches the existing spec instead of
+  regenerating it. IDs survive turns (`uiRootId`, component IDs,
+  column IDs, binding IDs), so the user's mental model — "the stars
+  column," "the issues tab" — stays attached to the same object across
+  refinements.
+- **Inspectable.** Flip to the JSON view and trace every panel back to
+  a binding back to a catalogued endpoint. Failures localize: a 404 or
+  a missing `field` is a one-line problem.
+- **Bounded surface area.** Adding a capability means adding a
+  primitive. The renderer is small, finite, and reviewable.
+- **No build step at runtime.** One LLM round-trip returns ~1 KB of
+  JSON; the renderer mounts immediately.
+- **Layered, so the LLM can be steered piece by piece.** UI,
+  aggregation, and endpoint are separable. Re-pointing the same UI tree
+  at a different data source is a one-layer edit.
+- **Portable.** The same JSON can be rendered by any client that
+  implements the vocabulary — Angular, Lit, native — exactly the bet
+  a2ui is making.
+- **Cheap to validate.** OpenAI strict-mode JSON Schema rejects
+  malformed output before it reaches the renderer.
+
+**Cons**
+
+- **Capped expressiveness.** Anything not in the vocabulary doesn't
+  exist; the model must refuse rather than improvise.
+- **More upfront work per capability.** Every new primitive is type
+  + LLM-schema branch + resolver branch + React component + prompt
+  copy + docs.
+- **Spec drift risk.** Spec docs, JSON Schema, and renderer registry
+  must stay in lockstep — enforced by convention, not the compiler.
+- **Awkward for highly bespoke UIs.** Dashboards fit naturally; a
+  freeform creative tool would chafe.
+
+### The generated-code alternative
+
+The LLM emits a React (or framework-of-choice) file; the system builds
+and serves it.
+
+**Pros**
+
+- **Unlimited expressiveness.** Anything React can express, the LLM can
+  request.
+- **No infrastructure to design.** No spec schema, no resolver, no
+  registry — just a sandbox that runs whatever the model wrote.
+
+**Cons**
+
+- **Unbounded threat model.** Arbitrary code in the browser means
+  arbitrary fetches, storage access, script execution. Sandboxing is a
+  permanent operating cost.
+- **Patches are rewrites.** The model has no stable handle on "the
+  stars column." A small change usually regenerates the whole file,
+  breaking scroll position, local state, and any user customizations.
+- **Hallucinates capabilities.** Without a typed vocabulary, the model
+  invents endpoints, library APIs, and prop shapes. Errors surface as
+  runtime crashes or — worse — silently-wrong data.
+- **Build/deploy in the loop.** Every iteration needs compile + bundle
+  + serve, which adds latency and failure modes.
+- **Hard to inspect.** Tracing "where did this number come from"
+  through generated React + ad-hoc fetch code is much harder than
+  reading 30 lines of JSON.
+- **Mixed concerns.** UI, data fetching, and transformation co-locate.
+  Re-pointing the dashboard at a different API means re-prompting the
+  whole file.
+- **Cost scales with size.** Generated React for a real dashboard is
+  tens of KB of output tokens. Our specs are ~1 KB.
+
+### Why ours is the right call for this product
+
+It comes down to what we're actually building: **dashboards that users
+iterate on conversationally over a small set of catalogued data
+sources.** Against that goal:
+
+1. **Iteration is the loop, not the demo.** A dashboard's value emerges
+   over several turns of refinement. Stable IDs and patch-not-rewrite
+   semantics make that loop work; regenerated code doesn't.
+2. **Safety isn't a feature we can defer.** The product runs LLM output
+   in the user's browser. Declarative JSON makes the "arbitrary code
+   execution" question disappear; generated code makes it a permanent
+   operating cost.
+3. **The vocabulary cap is the right cap.** We *want* the model to
+   refuse a Sankey diagram rather than fake one — refusal is the honest
+   signal that the product can't do something yet. Generated code
+   rewards "fake it 'till you make it," which corrodes user trust.
+4. **The three-layer model is only buyable with a spec.** Separating
+   UI from data from endpoints is what lets us swap GitHub for any
+   OpenAPI-described service later. Generated code conflates them and
+   forecloses that path.
+5. **Auditability scales with users.** When ten users hit a bug,
+   "show me the spec" is one screen of JSON. "Show me the generated
+   file" is ten different rewrites of the same dashboard.
+
+The trade-off we accept is real: the model can only emit what we
+taught it. But that ceiling moves up by one primitive per release, and
+every primitive comes with a renderer, a schema branch, and prompt
+copy — all reviewable, finite, finished work. Generated code's
+"infinite ceiling" is mostly an illusion; the floor is much lower than
+ours and the operating cost much higher.
 
 ## MVP scope
 
 The current implementation is deliberately narrow — just enough surface area to validate the three-layer model end-to-end. Everything else (charts, KPIs, aggregations, more endpoints, alternative renderers) lands as a named extension to this MVP, not by quietly widening it.
 
-- **UI:** `table` only, rendered with React + MUI.
+- **UI:** `table` for data, plus the `row` / `column` / `list` layout containers, the `card` / `tabs` grouping containers, and the `text` / `icon` display leaves, all rendered with React + MUI. Table columns compose recursively: a column can carry a `field` path *or* a nested `cell` UI node, so cells can be richer than a single value (e.g. an icon + bound text). Vocabulary (`justify` / `align` / `direction`, `child` / `tabs[].child`, text `variant`, icon `name`) is borrowed from Google's a2ui basic catalog.
 - **Aggregation:** none — bindings map endpoint response rows directly to table columns.
 - **Endpoint catalog:** two GitHub REST API endpoints (`https://api.github.com`). Unauthenticated for public data (60 req/hour) or authenticated with a GitHub Personal Access Token via `Authorization: Bearer <token>` (5000 req/hour):
   - `GET /users/{username}/repos` — paginated list of a user's public repositories (`type`, `sort`, `direction`, `page`, `per_page`).

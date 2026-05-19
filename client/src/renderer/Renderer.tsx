@@ -1,32 +1,37 @@
 /**
  * Dashboard renderer entry point.
  *
- * Looks up the root `ui` node's `type` in the component registry and
- * dispatches. Mirrors the a2ui React renderer's `ComponentNode` pattern:
- * the renderer holds no per-primitive logic — that lives in the
- * registered components.
+ * Registers every primitive in the registry, then dispatches the root
+ * `ui` node through `NodeRenderer`. Mirrors a2ui's React renderer
+ * pattern: the entry point holds no per-primitive logic — that lives in
+ * the registered components — and layout containers re-enter the same
+ * `NodeRenderer` to render their children.
  */
 
-import Alert from "@mui/material/Alert";
 import type { Dashboard } from "../spec";
-import { get, register } from "./registry";
+import { NodeRenderer, register } from "./registry";
 import { TableRenderer } from "./components/Table";
+import { RowRenderer } from "./components/Row";
+import { ColumnRenderer } from "./components/Column";
+import { ListRenderer } from "./components/List";
+import { CardRenderer } from "./components/Card";
+import { TabsRenderer } from "./components/Tabs";
+import { TextRenderer } from "./components/Text";
+import { IconRenderer } from "./components/Icon";
 
 register("table", TableRenderer);
+register("row", RowRenderer);
+register("column", ColumnRenderer);
+register("list", ListRenderer);
+register("card", CardRenderer);
+register("tabs", TabsRenderer);
+register("text", TextRenderer);
+register("icon", IconRenderer);
 
 interface RendererProps {
   dashboard: Dashboard;
 }
 
 export function Renderer({ dashboard }: RendererProps) {
-  const node = dashboard.ui;
-  const Component = get(node.type);
-  if (!Component) {
-    return (
-      <Alert severity="error">
-        Unknown UI primitive: <code>{node.type}</code>.
-      </Alert>
-    );
-  }
-  return <Component node={node} dashboard={dashboard} />;
+  return <NodeRenderer node={dashboard.ui} dashboard={dashboard} />;
 }

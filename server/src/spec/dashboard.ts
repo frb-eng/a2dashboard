@@ -21,6 +21,23 @@ export interface Dashboard {
   endpoints: Record<string, EndpointCall>;
 }
 
-export type { UINode, TableNode, TableColumn } from "./ui.js";
+export type {
+  UINode,
+  TableNode,
+  TableColumn,
+  RowNode,
+  ColumnNode,
+  ListNode,
+  CardNode,
+  TabsNode,
+  TabsTab,
+  TextNode,
+  TextVariant,
+  IconNode,
+  IconName,
+  LayoutJustify,
+  LayoutAlign,
+  ListDirection,
+} from "./ui.js";
 export type { Binding, RowsBinding } from "./data.js";
 export type { EndpointCall, RefreshPolicy, EndpointParamValue } from "./endpoint.js";
