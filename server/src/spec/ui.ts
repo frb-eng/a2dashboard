@@ -18,7 +18,8 @@
  *                   dashboard re-fetches with user-supplied values.
  *   - `button`    — clickable wrapper around a child component (typically
  *                   a `text` or `icon`) that triggers a declared `action`.
- *                   MVP action: `refresh`, which re-fires every binding.
+ *                   Actions are also the row-click handler on `table` —
+ *                   the same `Action` union drives both surfaces.
  *
  * The renderer executes only what is named here, and the LLM is told only
  * what is named here — these two stay in lockstep.
@@ -72,6 +73,14 @@ export interface TableNode {
   /** Id of a row-producing binding in `Dashboard.data`. */
   rows: string;
   columns: TableColumn[];
+  /**
+   * Optional action dispatched when a row is clicked. The action's
+   * `valueField` (for `setStateAndRefresh`) is resolved against the
+   * clicked row, so a master-detail pattern — click a repo on the left,
+   * see its contributors on the right — falls out without any code
+   * crossing the LLM→client boundary. When absent, rows are inert.
+   */
+  onRowClick?: Action;
 }
 
 export interface RowNode {
@@ -229,14 +238,27 @@ export interface TextFieldNode {
 export type ButtonVariant = "default" | "primary" | "borderless";
 
 /**
- * Declared button action. The renderer dispatches one of a fixed set —
- * no arbitrary code crosses the LLM→client boundary.
+ * Declared action — the renderer dispatches one of a fixed set; no
+ * arbitrary code crosses the LLM→client boundary. Used by `button.action`
+ * and `table.onRowClick`.
  *
- *  - `refresh` — bump the dashboard's refresh tick so every binding refetches
- *                with the latest state values (i.e. whatever's in the
- *                TextField slots). Single MVP action.
+ *  - `refresh` — bump the dashboard's refresh tick so every binding
+ *                refetches with the latest state values (i.e. whatever's
+ *                in the TextField slots).
+ *  - `setStateAndRefresh` — write a value into a state slot, then bump
+ *                the refresh tick so every binding re-fires against the
+ *                new value. The value is read from the surrounding row
+ *                context via `valueField` (a dotted path into the row):
+ *                for `table.onRowClick` the row is the clicked one; for
+ *                a `button` inside a table cell the row is that cell's
+ *                row. Outside a row context the slot is set to `""` and
+ *                refresh still runs. This is the master-detail wiring —
+ *                click a row on the left, the right panel refetches
+ *                against the selected value.
  */
-export type ButtonAction = { kind: "refresh" };
+export type Action =
+  | { kind: "refresh" }
+  | { kind: "setStateAndRefresh"; stateKey: string; valueField: string };
 
 export interface ButtonNode {
   type: "button";
@@ -247,7 +269,7 @@ export interface ButtonNode {
    */
   child: UINode;
   variant?: ButtonVariant;
-  action: ButtonAction;
+  action: Action;
 }
 
 /** Discriminated union over every UI primitive. */

@@ -10,6 +10,14 @@
  *   - Otherwise the column's `field` (dotted path) is applied to the row
  *     and the value is formatted for display.
  *
+ * When the node declares an `onRowClick` action, every row becomes
+ * clickable and dispatches that action with the clicked row in scope —
+ * `setStateAndRefresh` reads its `valueField` from the row, enabling
+ * master-detail layouts (select a repo on the left → contributors
+ * refetch on the right) without any code crossing the LLM→client
+ * boundary. Clicks on links/buttons inside cells are swallowed at the
+ * cell boundary so they don't double-trigger.
+ *
  * No transformation logic lives here; if a derived value is needed,
  * that's a signal to add an aggregation primitive, not to inline logic
  * in the renderer.
@@ -37,6 +45,8 @@ import type { TableNode } from "../../spec";
 import { useRows } from "../useRows";
 import { readPath } from "../data";
 import { RowContext } from "../RowContext";
+import { useDashboardState } from "../DashboardStateContext";
+import { dispatchAction } from "../dispatchAction";
 
 function formatCell(value: unknown): React.ReactNode {
   if (value == null) {
@@ -57,6 +67,8 @@ function formatCell(value: unknown): React.ReactNode {
 export function TableRenderer({ node, dashboard }: NodeRendererProps<TableNode>) {
   const binding = dashboard.data[node.rows];
   const { rows, loading, error, refresh } = useRows(binding, dashboard);
+  const { setValue, refreshAll } = useDashboardState();
+  const rowAction = node.onRowClick;
 
   if (!binding) {
     return (
@@ -116,9 +128,25 @@ export function TableRenderer({ node, dashboard }: NodeRendererProps<TableNode>)
               </TableRow>
             )}
             {rows?.map((row, i) => (
-              <TableRow key={i} hover>
+              <TableRow
+                key={i}
+                hover
+                onClick={
+                  rowAction
+                    ? () => dispatchAction(rowAction, { row, setValue, refreshAll })
+                    : undefined
+                }
+                sx={rowAction ? { cursor: "pointer" } : undefined}
+              >
                 {node.columns.map((col) => (
-                  <TableCell key={col.id}>
+                  <TableCell
+                    key={col.id}
+                    // Stop clicks on interactive cell content (links, buttons)
+                    // from bubbling up and double-firing the row action.
+                    onClick={
+                      rowAction && col.cell ? (e) => e.stopPropagation() : undefined
+                    }
+                  >
                     {col.cell ? (
                       <RowContext.Provider value={row}>
                         <NodeRenderer node={col.cell} dashboard={dashboard} />

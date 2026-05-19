@@ -73,6 +73,8 @@ interface IntermediateTableComponent {
   title: string | null;
   rows: string;
   columns: IntermediateTableColumn[];
+  /** Action dispatched on row click. Null when rows are inert. */
+  onRowClick: IntermediateAction | null;
 }
 
 interface IntermediateRowComponent {
@@ -202,15 +204,27 @@ interface IntermediateTextFieldComponent {
 const BUTTON_VARIANT_VALUES = ["default", "primary", "borderless"] as const;
 type IntermediateButtonVariant = (typeof BUTTON_VARIANT_VALUES)[number];
 
-const BUTTON_ACTION_KIND_VALUES = ["refresh"] as const;
-type IntermediateButtonActionKind = (typeof BUTTON_ACTION_KIND_VALUES)[number];
+const ACTION_KIND_VALUES = ["refresh", "setStateAndRefresh"] as const;
+type IntermediateActionKind = (typeof ACTION_KIND_VALUES)[number];
+
+/**
+ * Action in the LLM-emitted form. `stateKey` and `valueField` are
+ * non-null only when `kind === "setStateAndRefresh"`; for `"refresh"`
+ * both are null. The server flattens this into the public `Action`
+ * union in `toAction` below.
+ */
+interface IntermediateAction {
+  kind: IntermediateActionKind;
+  stateKey: string | null;
+  valueField: string | null;
+}
 
 interface IntermediateButtonComponent {
   type: "button";
   id: string;
   childId: string;
   variant: IntermediateButtonVariant | null;
-  action: { kind: IntermediateButtonActionKind };
+  action: IntermediateAction;
 }
 
 type IntermediateComponent =
@@ -296,11 +310,24 @@ interface IntermediateResponse {
   dashboard: IntermediateDashboard | null;
 }
 
+function actionSchema(): Record<string, unknown> {
+  return {
+    type: "object",
+    additionalProperties: false,
+    required: ["kind", "stateKey", "valueField"],
+    properties: {
+      kind: { type: "string", enum: [...ACTION_KIND_VALUES] },
+      stateKey: { type: ["string", "null"] },
+      valueField: { type: ["string", "null"] },
+    },
+  };
+}
+
 function tableComponentSchema(): Record<string, unknown> {
   return {
     type: "object",
     additionalProperties: false,
-    required: ["type", "id", "title", "rows", "columns"],
+    required: ["type", "id", "title", "rows", "columns", "onRowClick"],
     properties: {
       type: { type: "string", enum: ["table"] },
       id: { type: "string" },
@@ -320,6 +347,7 @@ function tableComponentSchema(): Record<string, unknown> {
           },
         },
       },
+      onRowClick: { anyOf: [{ type: "null" }, actionSchema()] },
     },
   };
 }
@@ -450,14 +478,7 @@ function buttonComponentSchema(): Record<string, unknown> {
       id: { type: "string" },
       childId: { type: "string" },
       variant: { type: ["string", "null"], enum: [...BUTTON_VARIANT_VALUES, null] },
-      action: {
-        type: "object",
-        additionalProperties: false,
-        required: ["kind"],
-        properties: {
-          kind: { type: "string", enum: [...BUTTON_ACTION_KIND_VALUES] },
-        },
-      },
+      action: actionSchema(),
     },
   };
 }
@@ -666,7 +687,7 @@ THREE-LAYER MODEL (when producing a dashboard)
   1. componentEntries + uiRootId — the UI tree, stored as a flat array of components addressed by id. \`uiRootId\` names the root. Containers reference their children by id (via \`childIds\`, \`childId\`, or \`tabs[].childId\`).
 
      UI primitives:
-       - \`table\`     — data-producing container. Fields: \`rows\` (binding id), \`columns\`, optional \`title\`.
+       - \`table\`     — data-producing container. Fields: \`rows\` (binding id), \`columns\`, \`onRowClick\` (action fired when a row is clicked, or null for inert rows), optional \`title\`.
                         Each column is { id, header, field, cellId }. Set EXACTLY ONE of \`field\` or \`cellId\` per column (the other must be null):
                             * \`field\` (dotted path into the row) — render the value directly as text.
                             * \`cellId\` (id of any component) — render that component inside every cell. Inside the cell, descendant \`text\` nodes resolve their \`field\` against the row.
@@ -678,7 +699,12 @@ THREE-LAYER MODEL (when producing a dashboard)
        - \`text\`      — display leaf. Fields: \`text\` (literal string), \`field\` (dotted path resolved against the surrounding row context), \`variant\`. Set EXACTLY ONE of \`text\` or \`field\` (the other null); \`field\` only resolves when the text sits inside a table column's \`cellId\` subtree.
        - \`icon\`      — display leaf. Field: \`name\` from a fixed enum.
        - \`textField\` — text input. Fields: \`label\`, \`stateKey\` (slot name written on every keystroke), \`defaultValue\` (seeds the slot on mount; null when empty), \`placeholder\`, \`variant\` ("shortText" | "longText" | "number" | "obscured"). The slot is read by endpoint params that set \`stateKey\`; nothing else consumes it. Match \`stateKey\` strings exactly between the textField and its consuming params.
-       - \`button\`    — clickable wrapper. Fields: \`childId\` (typically a \`text\` or \`icon\`), \`variant\` ("default" | "primary" | "borderless"), \`action\` ({ kind: "refresh" }). Only the \`refresh\` action exists in the MVP; it re-fires every binding using the latest \`textField\` values.
+       - \`button\`    — clickable wrapper. Fields: \`childId\` (typically a \`text\` or \`icon\`), \`variant\` ("default" | "primary" | "borderless"), \`action\` — see Actions below.
+
+     Actions (used by \`button.action\` and \`table.onRowClick\`):
+       Every action is { kind, stateKey, valueField }. EXACTLY the fields required by \`kind\` are non-null; the others must be null.
+         * { kind: "refresh", stateKey: null, valueField: null } — bump the refresh tick so every binding refetches against the current state.
+         * { kind: "setStateAndRefresh", stateKey: "<slot>", valueField: "<dotted path>" } — read the named field from the surrounding row (the clicked row for \`table.onRowClick\`; the row of the enclosing table cell for a \`button\` inside a cell), write it into the state slot, then bump the refresh tick. This is the master-detail wiring: a row click on the left table writes the selected key (e.g. \`name\`) into a slot, and a binding on the right whose endpoint param reads \`{ stateKey: "<same slot>" }\` refetches automatically.
 
      justify  ∈ ${JUSTIFY_VALUES.map((v) => `"${v}"`).join(" | ")}.
      align    ∈ ${ALIGN_VALUES.map((v) => `"${v}"`).join(" | ")}.
@@ -700,7 +726,7 @@ Cross-layer references use string ids and names:
   - filter binding \`source\` must equal some other dataEntries[*].id (and must not form a cycle)
   - rows binding \`endpoint\` must equal some endpointEntries[*].id
   - endpointEntries[*].call.endpointId must equal a catalogued endpoint id
-  - endpoint param \`stateKey\` and filter binding \`stateKey\` must each equal a textField's \`stateKey\` somewhere in the UI tree
+  - endpoint param \`stateKey\` and filter binding \`stateKey\` must each equal a slot written somewhere in the UI tree — either a \`textField\`'s \`stateKey\`, or an action's \`stateKey\` on a \`button.action\` / \`table.onRowClick\` with kind "setStateAndRefresh"
 
 ENDPOINT CATALOG (the only endpoints you may use):
 
@@ -713,7 +739,8 @@ GUIDANCE
   - \`tabs\` must have at least one entry. Each tab is a { title, childId } pair; the child is whatever component should appear when the tab is active.
   - Use \`text\` for headings and standalone labels in a layout. For plain tabular data, prefer a plain \`field\` column over a \`text\` cell — the cell-component path is for when you actually need composition (icon + value, badge, etc.).
   - When composing a custom cell, put a \`row\` (for icon+text) or \`column\` (for stacked lines) at \`cellId\` and reference \`text\` / \`icon\` leaves from there. \`text\` inside a cell uses \`field\` to read the row.
-  - Reach for \`textField\` + \`button\` when the user wants the dashboard to be interactive — e.g. "let me type a GitHub username and show their repos", "let me filter issues by label". The standard pattern is a \`column\` holding one or more \`textField\`s, a primary \`button\` whose action is { kind: "refresh" }, and the data \`table\` underneath. The button is the explicit "go" — endpoints do NOT refetch on every keystroke, only when the button is pressed or on mount.
+  - Reach for \`textField\` + \`button\` when the user wants the dashboard to be interactive — e.g. "let me type a GitHub username and show their repos", "let me filter issues by label". The standard pattern is a \`column\` holding one or more \`textField\`s, a primary \`button\` whose action is { kind: "refresh", stateKey: null, valueField: null }, and the data \`table\` underneath. The button is the explicit "go" — endpoints do NOT refetch on every keystroke, only when the button is pressed or on mount.
+  - For master-detail layouts ("click a row on the left, show its details on the right"), put a \`row\` (or two cards in a row) at the root with two \`table\`s side by side. The left table sets \`onRowClick\` to { kind: "setStateAndRefresh", stateKey: "<slot>", valueField: "<field on the row, e.g. name>" }. The right table's \`rows\` binding points at an endpoint whose path or query param consumes that slot via \`{ stateKey: "<same slot>" }\`. There is no textField in this pattern — the row click is the input. The slot is empty on mount, so the right table will show an error until the user clicks a row; that is expected.
   - When a textField feeds an endpoint param, give the textField a sensible \`defaultValue\` so the dashboard renders something on mount. Set the matching endpoint param's \`value\` to null and its \`stateKey\` to the textField's stateKey.
   - When the user wants free-text search over rows ("search issues by title pattern", "find repos whose name contains X"), use a \`filter\` binding with op "containsIgnoreCase". The table's \`rows\` then points at the filter binding; the filter's \`source\` points at the underlying \`rows\` binding. The filter's \`stateKey\` matches the search textField. The button's \`refresh\` action re-evaluates the filter at the same time it refetches data — an empty search field matches every row, so omit \`defaultValue\` on the search textField when you want everything visible on mount.
   - A button's \`childId\` is typically a \`text\` leaf ("Search", "Refresh", "Load"). For icon-only buttons, point \`childId\` at an \`icon\`.
@@ -742,6 +769,20 @@ export interface LLMResult {
   reply: string;
   /** Null when the model declined to produce or change a dashboard this turn. */
   dashboard: Dashboard | null;
+}
+
+function toAction(a: IntermediateAction, ownerId: string): import("./spec/ui.js").Action {
+  switch (a.kind) {
+    case "refresh":
+      return { kind: "refresh" };
+    case "setStateAndRefresh":
+      if (a.stateKey == null || a.valueField == null) {
+        throw new Error(
+          `Action on "${ownerId}" is setStateAndRefresh but is missing stateKey or valueField.`,
+        );
+      }
+      return { kind: "setStateAndRefresh", stateKey: a.stateKey, valueField: a.valueField };
+  }
 }
 
 function buildUITree(
@@ -773,6 +814,7 @@ function buildUITree(
               ? { cell: buildUITree(col.cellId, byId, visiting) }
               : {}),
           })),
+          ...(c.onRowClick ? { onRowClick: toAction(c.onRowClick, c.id) } : {}),
         };
       case "row":
         return {
@@ -848,7 +890,7 @@ function buildUITree(
           id: c.id,
           child: buildUITree(c.childId, byId, visiting),
           ...(c.variant ? { variant: c.variant } : {}),
-          action: c.action,
+          action: toAction(c.action, c.id),
         };
     }
   } finally {
