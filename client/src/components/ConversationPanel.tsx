@@ -32,6 +32,7 @@ const EXAMPLES: string[] = [
   "I want to see the open issues for react, angular and vue projects.",
   "I want a search input where I can type a pattern. A button to apply my search criteria and below a table of issues in react project. So a issue search dashboard for react repo.",
   "In the left column I want to see the anthropics repositories. Clicking one of them shows in the right column the list of contributors.",
+  "On left side I want to see the top 10 anthropic repos (based on amount of contributors). Clicking on a repo I see on the right side the top 3 contributors name.",
 ];
 
 interface ConversationPanelProps {

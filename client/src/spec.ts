@@ -218,7 +218,22 @@ export interface FilterBinding {
   value: string | number | boolean | StateRef;
 }
 
-export type Binding = RowsBinding | FilterBinding;
+/**
+ * Truncates another binding's rows to at most `count` entries — the
+ * "top N" primitive. The source binding's row order is preserved; pair
+ * with an endpoint whose response is already ordered usefully (e.g.
+ * `github.repoContributors` returns contributors by commit count desc,
+ * so `limit 3` is the top 3 contributors).
+ */
+export interface LimitBinding {
+  type: "limit";
+  /** Id of another binding in `Dashboard.data` whose rows we truncate. */
+  source: string;
+  /** Maximum number of rows to keep. Non-negative integer literal. */
+  count: number;
+}
+
+export type Binding = RowsBinding | FilterBinding | LimitBinding;
 
 export type RefreshPolicy =
   | { kind: "manual" }

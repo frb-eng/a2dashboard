@@ -263,7 +263,21 @@ interface IntermediateFilterBinding {
   stateKey: string | null;
 }
 
-type IntermediateBinding = IntermediateRowsBinding | IntermediateFilterBinding;
+/**
+ * Limit binding in the LLM-emitted form. Truncates `source` rows to at
+ * most `count` entries — the "top N" primitive. `count` is a
+ * non-negative integer literal.
+ */
+interface IntermediateLimitBinding {
+  type: "limit";
+  source: string;
+  count: number;
+}
+
+type IntermediateBinding =
+  | IntermediateRowsBinding
+  | IntermediateFilterBinding
+  | IntermediateLimitBinding;
 
 /**
  * Endpoint param value carried in the LLM-emitted intermediate form.
@@ -529,8 +543,23 @@ function filterBindingSchema(): Record<string, unknown> {
   };
 }
 
+function limitBindingSchema(): Record<string, unknown> {
+  return {
+    type: "object",
+    additionalProperties: false,
+    required: ["type", "source", "count"],
+    properties: {
+      type: { type: "string", enum: ["limit"] },
+      source: { type: "string" },
+      count: { type: "integer", minimum: 0 },
+    },
+  };
+}
+
 function bindingSchema(): Record<string, unknown> {
-  return { anyOf: [rowsBindingSchema(), filterBindingSchema()] };
+  return {
+    anyOf: [rowsBindingSchema(), filterBindingSchema(), limitBindingSchema()],
+  };
 }
 
 function dashboardObjectSchema(): Record<string, unknown> {
@@ -714,16 +743,17 @@ THREE-LAYER MODEL (when producing a dashboard)
      button variant   ∈ ${BUTTON_VARIANT_VALUES.map((v) => `"${v}"`).join(" | ")}.
      icon name ∈ ${ICON_NAME_VALUES.map((v) => `"${v}"`).join(" | ")}.
 
-  2. dataEntries — bindings that name how rows are produced. Two variants:
+  2. dataEntries — bindings that name how rows are produced. Three variants:
        - \`rows\`   — fetch from an endpoint and pass the response array through unchanged. Fields: \`endpoint\` (endpoint entry id), \`rowsPath\` (dotted path into the response body when the array isn't at the top level; null for the catalogued GitHub endpoints).
        - \`filter\` — keep only rows from another binding whose \`field\` matches \`value\`. Fields: \`source\` (id of another binding in dataEntries — typically a \`rows\` binding, but filters can chain), \`field\` (dotted path into each row, e.g. "title" or "user.login"), \`op\` ("containsIgnoreCase" — the only MVP operator), and exactly one of \`value\` (literal scalar) / \`stateKey\` (textField slot, resolved at fetch time). Use \`filter\` for client-side search-style filtering when the GitHub endpoint can't express the predicate as a query param (e.g. text search over issue titles — \`labels\` is server-side, free-text isn't).
+       - \`limit\`  — truncate another binding's rows to at most \`count\` entries — the "top N" primitive. Fields: \`source\` (id of another binding), \`count\` (non-negative integer literal). The source's row order is preserved, so pair this with an endpoint whose response is already ordered usefully (e.g. \`github.repoContributors\` returns contributors by commit count desc, so a \`limit\` over it gives "top N contributors"; \`github.userRepos\` with \`sort: "updated"\` + \`limit\` gives "most recently updated N repos"). Filters and limits chain through \`source\` — a \`limit\` whose \`source\` is a \`filter\` is "top N of the filtered rows".
   3. endpointEntries — concrete invocations of catalogued endpoints (id + params + refresh). Each param is { name, value, stateKey } where EXACTLY ONE of \`value\` (literal scalar) and \`stateKey\` (name of a textField slot, read at fetch time) is non-null.
 
 Cross-layer references use string ids and names:
   - uiRootId must equal some componentEntries[*].id
   - childIds[*], childId, tabs[*].childId, and columns[*].cellId must each equal some componentEntries[*].id (when not null)
   - table.rows must equal some dataEntries[*].id
-  - filter binding \`source\` must equal some other dataEntries[*].id (and must not form a cycle)
+  - filter and limit binding \`source\` must each equal some other dataEntries[*].id (and must not form a cycle)
   - rows binding \`endpoint\` must equal some endpointEntries[*].id
   - endpointEntries[*].call.endpointId must equal a catalogued endpoint id
   - endpoint param \`stateKey\` and filter binding \`stateKey\` must each equal a slot written somewhere in the UI tree — either a \`textField\`'s \`stateKey\`, or an action's \`stateKey\` on a \`button.action\` / \`table.onRowClick\` with kind "setStateAndRefresh"
@@ -743,6 +773,7 @@ GUIDANCE
   - For master-detail layouts ("click a row on the left, show its details on the right"), put a \`row\` (or two cards in a row) at the root with two \`table\`s side by side. The left table sets \`onRowClick\` to { kind: "setStateAndRefresh", stateKey: "<slot>", valueField: "<field on the row, e.g. name>" }. The right table's \`rows\` binding points at an endpoint whose path or query param consumes that slot via \`{ stateKey: "<same slot>" }\`. There is no textField in this pattern — the row click is the input. The renderer detects that the right endpoint's required path param is a state ref into an empty slot and holds the fetch until the user clicks a row; until then the right table sits idle with a "Waiting for <slot>…" placeholder, not an error. The row click writes the slot and bumps the refresh tick, opening the gate.
   - When a textField feeds an endpoint param, give the textField a sensible \`defaultValue\` so the dashboard renders something on mount. Set the matching endpoint param's \`value\` to null and its \`stateKey\` to the textField's stateKey.
   - When the user wants free-text search over rows ("search issues by title pattern", "find repos whose name contains X"), use a \`filter\` binding with op "containsIgnoreCase". The table's \`rows\` then points at the filter binding; the filter's \`source\` points at the underlying \`rows\` binding. The filter's \`stateKey\` matches the search textField. The button's \`refresh\` action re-evaluates the filter at the same time it refetches data — an empty search field matches every row, so omit \`defaultValue\` on the search textField when you want everything visible on mount.
+  - When the user asks for a "top N" / "first N" / "N latest" view, wrap the underlying \`rows\` binding in a \`limit\` binding with the matching \`count\` and point the table's \`rows\` at the \`limit\`. The source's row order is preserved verbatim, so choose the underlying endpoint's \`sort\` / \`direction\` (when available) — or pick an endpoint that's already usefully ordered — so the first N is actually the "top". \`github.repoContributors\` returns contributors by commit count desc, so a \`limit\` over it is the natural "top N contributors". For "top N repos" prefer setting \`sort\` on \`github.userRepos\` (e.g. \`sort: "updated"\` for most recently updated) and then limiting; the GitHub repos endpoint has no contributor-count sort, so if the user asks for "top repos by contributors" use the closest available proxy (\`sort: "updated"\` or default) and pick the top N.
   - A button's \`childId\` is typically a \`text\` leaf ("Search", "Refresh", "Load"). For icon-only buttons, point \`childId\` at an \`icon\`.
   - For tables: pick 4–7 useful columns. Column \`field\` is a dotted path into the row object (e.g. "owner.login").
   - Use null for title, justify, align, direction, rowsPath when not needed; the catalogued endpoints return arrays at the top level so rowsPath is usually null.
@@ -919,6 +950,8 @@ function toBinding(
         b.stateKey != null ? { stateKey: b.stateKey } : (b.value as string | number | boolean);
       return { type: "filter", source: b.source, field: b.field, op: b.op, value };
     }
+    case "limit":
+      return { type: "limit", source: b.source, count: b.count };
   }
 }
 

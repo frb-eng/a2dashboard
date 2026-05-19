@@ -24,6 +24,7 @@ import type {
   EndpointCall,
   EndpointParamValue,
   FilterBinding,
+  LimitBinding,
   RowsBinding,
 } from "../spec";
 
@@ -177,6 +178,19 @@ async function fetchRowsBinding(
   return rows as Record<string, unknown>[];
 }
 
+function applyLimit(
+  rows: Record<string, unknown>[],
+  binding: LimitBinding,
+): Record<string, unknown>[] {
+  if (!Number.isFinite(binding.count) || binding.count < 0) {
+    throw new Error(
+      `Limit binding count must be a non-negative number, got ${binding.count}.`,
+    );
+  }
+  const n = Math.floor(binding.count);
+  return rows.slice(0, n);
+}
+
 function applyFilter(
   rows: Record<string, unknown>[],
   binding: FilterBinding,
@@ -239,6 +253,32 @@ export async function fetchRows(
           visiting,
         );
         return applyFilter(upstream, binding, resolveState);
+      } finally {
+        visiting.delete(binding.source);
+      }
+    }
+    case "limit": {
+      const source = dashboard.data[binding.source];
+      if (!source) {
+        throw new Error(
+          `Limit binding references unknown source id "${binding.source}".`,
+        );
+      }
+      if (visiting.has(binding.source)) {
+        throw new Error(
+          `Binding cycle detected at limit source "${binding.source}".`,
+        );
+      }
+      visiting.add(binding.source);
+      try {
+        const upstream = await fetchRows(
+          source,
+          dashboard,
+          catalog,
+          resolveState,
+          visiting,
+        );
+        return applyLimit(upstream, binding);
       } finally {
         visiting.delete(binding.source);
       }
