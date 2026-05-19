@@ -38,6 +38,13 @@ export interface TableNode {
   /** Id of a binding in `Dashboard.data`. */
   rows: string;
   columns: TableColumn[];
+  /**
+   * Optional action dispatched on row click. The action's `valueField`
+   * (when `kind === "setStateAndRefresh"`) is resolved against the
+   * clicked row, enabling master-detail: click a row on the left, the
+   * right panel refetches against the selected value.
+   */
+  onRowClick?: Action;
 }
 
 export interface RowNode {
@@ -151,8 +158,18 @@ export interface TextFieldNode {
 
 export type ButtonVariant = "default" | "primary" | "borderless";
 
-/** Declared button action — MVP supports `refresh` only. */
-export type ButtonAction = { kind: "refresh" };
+/**
+ * Declared action — dispatched by `button.action` and `table.onRowClick`.
+ *
+ *  - `refresh` — bump the dashboard's refresh tick.
+ *  - `setStateAndRefresh` — write the surrounding row's `valueField`
+ *    into the state slot named by `stateKey`, then bump the refresh
+ *    tick so every binding re-fires with the new value. Outside a row
+ *    context the slot is set to "" and refresh still runs.
+ */
+export type Action =
+  | { kind: "refresh" }
+  | { kind: "setStateAndRefresh"; stateKey: string; valueField: string };
 
 export interface ButtonNode {
   type: "button";
@@ -160,7 +177,7 @@ export interface ButtonNode {
   /** Single child UI node — typically a `text` label or an `icon`. */
   child: UINode;
   variant?: ButtonVariant;
-  action: ButtonAction;
+  action: Action;
 }
 
 export type UINode =

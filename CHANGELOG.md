@@ -17,6 +17,21 @@ release notes per tag.
   the rows of that entry and the OpenAI strict-mode `endpointId` enum
   picks up the new id automatically.
 
+- **Row-click actions on `table` + `setStateAndRefresh` —
+  master-detail without code.** The `Action` union (previously
+  button-only, previously `refresh`-only) gains a second variant
+  `{ kind: "setStateAndRefresh", stateKey, valueField }` that reads
+  `valueField` from the surrounding row, writes it into the named
+  state slot, and bumps the refresh tick in one step. Tables now
+  carry an optional `onRowClick: Action` that dispatches with the
+  clicked row in scope; buttons inside a table cell pick up the
+  cell's row via `RowContext` so the same action works there too.
+  Together this is the master-detail wiring — a click on the left
+  table writes a slot that the right panel's endpoint param consumes
+  via `{ stateKey }`, with no `textField` and no code escape hatch.
+  Same closed dispatch as before: the renderer's switch has the
+  complete vocabulary, and new actions land as new variants.
+
 ## v0.0.2 — Composable, interactive dashboards (2026-05-19)
 
 Second tagged milestone. The renderer's vocabulary grows from one

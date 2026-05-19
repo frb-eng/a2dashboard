@@ -39,7 +39,7 @@ export type {
   TextFieldVariant,
   ButtonNode,
   ButtonVariant,
-  ButtonAction,
+  Action,
   LayoutJustify,
   LayoutAlign,
   ListDirection,

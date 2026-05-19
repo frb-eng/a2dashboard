@@ -260,7 +260,7 @@ optional `title`. The fields below are in addition to those.
 
 | Component | What it is | Key fields |
 |---|---|---|
-| `table` | Renders rows from a binding. Each column is either a raw `field` path or a nested `cell` UI node; cell subtrees see the current row via a React context, so a `text` leaf inside a cell can `field`-bind against it. | `rows` (binding id), `columns[]` of `{ id, header, field?, cell? }` |
+| `table` | Renders rows from a binding. Each column is either a raw `field` path or a nested `cell` UI node; cell subtrees see the current row via a React context, so a `text` leaf inside a cell can `field`-bind against it. An optional `onRowClick` action turns rows into a master-detail trigger — clicking a row dispatches the action with the clicked row in scope. | `rows` (binding id), `columns[]` of `{ id, header, field?, cell? }`, `onRowClick?` |
 
 ### Layout containers (flex)
 
@@ -308,11 +308,21 @@ to a named state slot that endpoint params can consume.
 | Component | What it is | Key fields |
 |---|---|---|
 | `textField` | Labeled text input wired into the dashboard's shared state map. The user-typed value flows into the slot named by `stateKey`; endpoint params declared as `{ stateKey: "<same key>" }` pick it up on the next refresh. `defaultValue` seeds the slot on mount so the dashboard renders something before the user types. Typing alone does **not** refetch — pair with a `button` for the explicit "go". | `label`, `stateKey`, `defaultValue?`, `placeholder?`, `variant` |
-| `button` | Clickable wrapper around a single child node (typically `text` for a labeled button, or `icon` for an icon-only one). Dispatches one of a fixed enum of declared `action`s — never arbitrary code. The MVP action `{ kind: "refresh" }` bumps a shared refresh tick, re-firing every binding using the current state values. New actions land as new spec variants, not as a code escape hatch. | `child`, `variant`, `action` |
+| `button` | Clickable wrapper around a single child node (typically `text` for a labeled button, or `icon` for an icon-only one). Dispatches one of a fixed enum of declared `action`s — never arbitrary code. See **Actions** below. | `child`, `variant`, `action` |
 
 `textField variant` ∈ `shortText` · `longText` · `number` · `obscured`.
 `button variant` ∈ `default` · `primary` · `borderless`.
-`button action` ∈ `{ "kind": "refresh" }`.
+
+#### Actions
+
+Both `button.action` and `table.onRowClick` carry an `Action`. The
+renderer dispatches exactly one of the variants below — there is no
+free-form code path.
+
+| Action | What it does |
+|---|---|
+| `{ "kind": "refresh" }` | Bumps the dashboard's shared refresh tick; every binding refetches using the current state slot values. |
+| `{ "kind": "setStateAndRefresh", "stateKey": "<slot>", "valueField": "<dotted path>" }` | Reads `valueField` from the row in scope, writes it into the named state slot, **then** bumps the refresh tick. The row in scope is the clicked row for `table.onRowClick`, the enclosing table cell's row for a `button` inside a cell, or empty otherwise (the slot gets `""`). This is the master-detail wiring — a row click on the left repopulates a slot that the right panel's endpoint param consumes. |
 
 #### State-bound endpoint params
 
@@ -356,6 +366,63 @@ The dashboard renders on mount with `username=octocat`; typing into the
 field updates the slot; clicking the button bumps the refresh tick and
 the table reloads against the new value. No keystroke fetches the
 network on its own — the button is the explicit "go".
+
+#### Master-detail with `table.onRowClick`
+
+A row click can write into the shared state map and refresh in one
+step, with no `textField` involved. The left table lists repositories;
+clicking one writes its `name` into `selectedRepo`, which the right
+table's contributors endpoint consumes as its `repo` path param:
+
+```jsonc
+{
+  "ui": {
+    "type": "row",
+    "id": "root",
+    "children": [
+      { "type": "table", "id": "repos", "rows": "repos_binding",
+        "columns": [
+          { "id": "name",  "header": "Repository", "field": "name" },
+          { "id": "stars", "header": "Stars",      "field": "stargazers_count" }
+        ],
+        "onRowClick": {
+          "kind": "setStateAndRefresh",
+          "stateKey": "selectedRepo",
+          "valueField": "name"
+        }
+      },
+      { "type": "table", "id": "contributors", "rows": "contributors_binding",
+        "columns": [
+          { "id": "login",  "header": "Contributor", "field": "login" },
+          { "id": "commits","header": "Commits",     "field": "contributions" }
+        ]
+      }
+    ]
+  },
+  "data": {
+    "repos_binding":        { "type": "rows", "endpoint": "repos_call" },
+    "contributors_binding": { "type": "rows", "endpoint": "contributors_call" }
+  },
+  "endpoints": {
+    "repos_call": {
+      "endpointId": "github.userRepos",
+      "params": { "username": "anthropics" },
+      "refresh": { "kind": "on-mount" }
+    },
+    "contributors_call": {
+      "endpointId": "github.repoContributors",
+      "params": { "owner": "anthropics", "repo": { "stateKey": "selectedRepo" } },
+      "refresh": { "kind": "on-mount" }
+    }
+  }
+}
+```
+
+On mount the left table shows every `anthropics` repository. The right
+table starts in an error state because its `repo` path param is unset;
+once the user clicks a repository on the left, `selectedRepo` is written
+and the refresh tick fires, so the contributors table refetches against
+the chosen repo. Clicking another repository repeats the cycle.
 
 ## Bindings
 
@@ -517,9 +584,9 @@ The current implementation is deliberately narrow — just enough surface area t
 
 - **UI:** the ten primitives listed under [Supported components](#supported-components). Rendered with React + MUI.
 - **Aggregation:** the two bindings listed under [Bindings](#bindings) — `rows` for raw endpoint responses and `filter` (op `containsIgnoreCase`) for client-side text filtering. No `group` / `agg` / `join` / `time-bucket` yet.
-- **Endpoint catalog:** the three GitHub endpoints listed under [Supported data sources](#supported-data-sources). Pagination is the only data-side behavior; refresh policy is `on-mount` or `manual`. Endpoint param values may also be `{ stateKey }` references that resolve against `textField` slots at fetch time, making a button-driven "type → search" dashboard expressible without any code escape hatch.
+- **Endpoint catalog:** the three GitHub endpoints listed under [Supported data sources](#supported-data-sources). Pagination is the only data-side behavior; refresh policy is `on-mount` or `manual`. Endpoint param values may also be `{ stateKey }` references that resolve against shared state slots at fetch time — slots are written by `textField` keystrokes or by `setStateAndRefresh` actions fired from buttons or row clicks — making a button-driven "type → search" or click-driven "select → detail" dashboard expressible without any code escape hatch.
 
-In practice, a small MVP dashboard JSON is a single `table` bound to one of the catalogued endpoints; a richer one composes several tables under a `row`, `column`, `tabs`, or `card`; an interactive one adds a `textField` + `button` row whose state feeds either an endpoint param (refetch on apply) or a `filter` binding (re-narrow on apply).
+In practice, a small MVP dashboard JSON is a single `table` bound to one of the catalogued endpoints; a richer one composes several tables under a `row`, `column`, `tabs`, or `card`; an interactive one adds a `textField` + `button` row whose state feeds either an endpoint param (refetch on apply) or a `filter` binding (re-narrow on apply); a master-detail one gives a `table` an `onRowClick: setStateAndRefresh` action and points a second table's endpoint param at the same slot.
 
 ## Milestones
 
