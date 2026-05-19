@@ -245,17 +245,120 @@ copy — all reviewable, finite, finished work. Generated code's
 "infinite ceiling" is mostly an illusion; the floor is much lower than
 ours and the operating cost much higher.
 
+## Supported components
+
+The renderer ships eight UI primitives. The LLM is told about exactly
+these — any request that would require a primitive not listed here is
+refused with a textual reply, rather than faked. Vocabulary is borrowed
+from Google's a2ui basic catalog so a spec written against this
+renderer reads sensibly against any other a2ui-compatible one.
+
+Every component has a stable `id` (preserved across patches) and an
+optional `title`. The fields below are in addition to those.
+
+### Data
+
+| Component | What it is | Key fields |
+|---|---|---|
+| `table` | Renders rows from a binding. Each column is either a raw `field` path or a nested `cell` UI node; cell subtrees see the current row via a React context, so a `text` leaf inside a cell can `field`-bind against it. | `rows` (binding id), `columns[]` of `{ id, header, field?, cell? }` |
+
+### Layout containers (flex)
+
+| Component | What it is | Key fields |
+|---|---|---|
+| `row` | Horizontal flex container — children laid out left-to-right. | `children[]`, `justify`, `align` |
+| `column` | Vertical flex container — children laid out top-to-bottom. | `children[]`, `justify`, `align` |
+| `list` | Uniform flex container with a configurable axis. Horizontal lists scroll along the x-axis; vertical lists stack. | `children[]`, `direction`, `align` |
+
+`justify` ∈ `start` · `center` · `end` · `spaceBetween` · `spaceAround` · `spaceEvenly`.
+`align`   ∈ `start` · `center` · `end` · `stretch`.
+`direction` ∈ `vertical` · `horizontal`.
+
+### Grouping containers
+
+| Component | What it is | Key fields |
+|---|---|---|
+| `card` | Bordered, elevated single-child wrapper with an optional heading. To put multiple things in a card, point `child` at a `row`/`column`/`list`. | `child` |
+| `tabs` | Tabbed switcher between several titled child views. The first tab is active on mount; only the active panel is mounted, so an inactive tab won't fetch. | `tabs: [{ title, child }]` |
+
+### Display leaves
+
+| Component | What it is | Key fields |
+|---|---|---|
+| `text` | Plain text with a typography hint, mapped onto MUI's `Typography`. When placed inside a table cell, `field` reads from the row instead of the literal `text`. | `text` *or* `field`, `variant` |
+| `icon` | A named glyph from a curated enum, mapped onto `@mui/icons-material`. | `name` |
+
+`variant` ∈ `h1` · `h2` · `h3` · `h4` · `h5` · `caption` · `body`.
+
+`name` ∈ `accountCircle` · `add` · `arrowBack` · `arrowForward` ·
+`calendarToday` · `check` · `close` · `delete` · `download` · `edit` ·
+`error` · `favorite` · `folder` · `help` · `home` · `info` · `lock` ·
+`lockOpen` · `mail` · `menu` · `person` · `refresh` · `search` · `send` ·
+`settings` · `share` · `star` · `upload` · `visibility` ·
+`visibilityOff` · `warning`.
+
+## Supported data sources
+
+The endpoint catalog is hardcoded in `server/src/catalog/github.ts`
+and serves two GitHub REST endpoints under `https://api.github.com`.
+Requests can be unauthenticated for public data (60 req/hour) or
+authenticated with a GitHub Personal Access Token via
+`Authorization: Bearer <token>` (5000 req/hour).
+
+A future iteration will accept user-registered APIs (OpenAPI ingest)
+per tenant; the catalog interface is kept narrow on purpose so that
+swap stays cheap.
+
+### `github.userRepos` — list a user's repositories
+
+`GET https://api.github.com/users/{username}/repos`
+
+Paginated list of a user's public repositories.
+
+| Param | In | Required | Notes |
+|---|---|---|---|
+| `username` | path | yes | GitHub username. |
+| `type` | query | no | `all` · `owner` · `member` |
+| `sort` | query | no | `created` · `updated` · `pushed` · `full_name` |
+| `direction` | query | no | `asc` · `desc` |
+| `page` | query | no | Page number (1-based). |
+| `per_page` | query | no | Results per page (max 100). |
+
+Row fields commonly used in column bindings: `name`, `full_name`,
+`html_url`, `description`, `stargazers_count`, `forks_count`,
+`open_issues_count`, `language`, `updated_at`, `owner.login`.
+
+### `github.repoIssues` — list issues for a repository
+
+`GET https://api.github.com/repos/{owner}/{repo}/issues`
+
+Paginated list of issues for a repository.
+
+| Param | In | Required | Notes |
+|---|---|---|---|
+| `owner` | path | yes | Repository owner (user or org). |
+| `repo` | path | yes | Repository name. |
+| `state` | query | no | `open` · `closed` · `all` |
+| `labels` | query | no | Comma-separated label names. |
+| `sort` | query | no | `created` · `updated` · `comments` |
+| `direction` | query | no | `asc` · `desc` |
+| `since` | query | no | ISO 8601 timestamp. |
+| `page` | query | no | Page number (1-based). |
+| `per_page` | query | no | Results per page (max 100). |
+
+Row fields commonly used in column bindings: `number`, `title`,
+`state`, `html_url`, `user.login`, `comments`, `created_at`,
+`updated_at`.
+
 ## MVP scope
 
 The current implementation is deliberately narrow — just enough surface area to validate the three-layer model end-to-end. Everything else (charts, KPIs, aggregations, more endpoints, alternative renderers) lands as a named extension to this MVP, not by quietly widening it.
 
-- **UI:** `table` for data, plus the `row` / `column` / `list` layout containers, the `card` / `tabs` grouping containers, and the `text` / `icon` display leaves, all rendered with React + MUI. Table columns compose recursively: a column can carry a `field` path *or* a nested `cell` UI node, so cells can be richer than a single value (e.g. an icon + bound text). Vocabulary (`justify` / `align` / `direction`, `child` / `tabs[].child`, text `variant`, icon `name`) is borrowed from Google's a2ui basic catalog.
+- **UI:** the eight primitives listed under [Supported components](#supported-components). Rendered with React + MUI.
 - **Aggregation:** none — bindings map endpoint response rows directly to table columns.
-- **Endpoint catalog:** two GitHub REST API endpoints (`https://api.github.com`). Unauthenticated for public data (60 req/hour) or authenticated with a GitHub Personal Access Token via `Authorization: Bearer <token>` (5000 req/hour):
-  - `GET /users/{username}/repos` — paginated list of a user's public repositories (`type`, `sort`, `direction`, `page`, `per_page`).
-  - `GET /repos/{owner}/{repo}/issues` — paginated list of issues for a repository (`state`, `labels`, `sort`, `direction`, `since`, `page`, `per_page`).
+- **Endpoint catalog:** the two GitHub endpoints listed under [Supported data sources](#supported-data-sources). Pagination is the only data-side behavior; refresh policy is `on-mount` or `manual`.
 
-In practice, an MVP dashboard JSON looks like a `table` UI node whose columns are bound to fields from one of those two endpoints, with pagination as the only data-side behavior.
+In practice, a small MVP dashboard JSON is a single `table` bound to one of the catalogued endpoints; a richer one composes several tables under a `row`, `column`, `tabs`, or `card`.
 
 ## Milestones
 
