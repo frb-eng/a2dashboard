@@ -419,10 +419,16 @@ table's contributors endpoint consumes as its `repo` path param:
 ```
 
 On mount the left table shows every `anthropics` repository. The right
-table starts in an error state because its `repo` path param is unset;
-once the user clicks a repository on the left, `selectedRepo` is written
-and the refresh tick fires, so the contributors table refetches against
-the chosen repo. Clicking another repository repeats the cycle.
+table sits idle ("Waiting for selectedRepo…") because its `repo` path
+param is bound to a state slot that is empty on mount — the renderer
+knows from the catalog that `repo` is required and holds the fetch
+rather than throwing "missing path param". The moment the user clicks
+a repository on the left, `selectedRepo` is written and the refresh
+tick fires; the gate opens and the contributors table fetches against
+the chosen repo. Clicking another repository repeats the cycle. The
+spec carries no extra annotation — the catalog's `required` flag plus
+"the param's value is a `{ stateKey }` whose slot is empty" is the
+whole rule.
 
 ## Bindings
 
@@ -584,7 +590,7 @@ The current implementation is deliberately narrow — just enough surface area t
 
 - **UI:** the ten primitives listed under [Supported components](#supported-components). Rendered with React + MUI.
 - **Aggregation:** the two bindings listed under [Bindings](#bindings) — `rows` for raw endpoint responses and `filter` (op `containsIgnoreCase`) for client-side text filtering. No `group` / `agg` / `join` / `time-bucket` yet.
-- **Endpoint catalog:** the three GitHub endpoints listed under [Supported data sources](#supported-data-sources). Pagination is the only data-side behavior; refresh policy is `on-mount` or `manual`. Endpoint param values may also be `{ stateKey }` references that resolve against shared state slots at fetch time — slots are written by `textField` keystrokes or by `setStateAndRefresh` actions fired from buttons or row clicks — making a button-driven "type → search" or click-driven "select → detail" dashboard expressible without any code escape hatch.
+- **Endpoint catalog:** the three GitHub endpoints listed under [Supported data sources](#supported-data-sources). Pagination is the only data-side behavior; refresh policy is `on-mount` or `manual`. Endpoint param values may also be `{ stateKey }` references that resolve against shared state slots at fetch time — slots are written by `textField` keystrokes or by `setStateAndRefresh` actions fired from buttons or row clicks — making a button-driven "type → search" or click-driven "select → detail" dashboard expressible without any code escape hatch. The renderer holds a fetch when a *required* catalog param (e.g. `repo` on `github.repoContributors`) is bound to a `{ stateKey }` whose slot is empty — the master-detail right panel sits idle until the row click writes the slot, instead of throwing "missing path param".
 
 In practice, a small MVP dashboard JSON is a single `table` bound to one of the catalogued endpoints; a richer one composes several tables under a `row`, `column`, `tabs`, or `card`; an interactive one adds a `textField` + `button` row whose state feeds either an endpoint param (refetch on apply) or a `filter` binding (re-narrow on apply); a master-detail one gives a `table` an `onRowClick: setStateAndRefresh` action and points a second table's endpoint param at the same slot.
 

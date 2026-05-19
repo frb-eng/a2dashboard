@@ -66,7 +66,10 @@ function formatCell(value: unknown): React.ReactNode {
 
 export function TableRenderer({ node, dashboard }: NodeRendererProps<TableNode>) {
   const binding = dashboard.data[node.rows];
-  const { rows, loading, error, refresh } = useRows(binding, dashboard);
+  const { rows, loading, error, idle, pendingStateKeys, refresh } = useRows(
+    binding,
+    dashboard,
+  );
   const { setValue, refreshAll } = useDashboardState();
   const rowAction = node.onRowClick;
 
@@ -164,7 +167,11 @@ export function TableRenderer({ node, dashboard }: NodeRendererProps<TableNode>)
               <TableRow>
                 <TableCell colSpan={node.columns.length} align="center">
                   <Typography variant="body2" color="text.secondary" sx={{ py: 2 }}>
-                    {loading ? "Loading…" : " "}
+                    {loading
+                      ? "Loading…"
+                      : idle
+                        ? `Waiting for ${pendingStateKeys.join(", ")}…`
+                        : " "}
                   </Typography>
                 </TableCell>
               </TableRow>

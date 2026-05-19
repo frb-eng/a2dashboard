@@ -106,6 +106,31 @@ export function buildUrl(
   return qs ? `${url}?${qs}` : url;
 }
 
+/**
+ * Walk a binding's `source` chain to its underlying `rows` binding. Used
+ * by the renderer to look up the endpoint call that ultimately backs a
+ * (possibly filtered) binding — e.g. to decide whether its refresh
+ * policy gates the fetch on a state slot being populated.
+ *
+ * Returns null if the chain is broken (dangling source, cycle, or
+ * unknown id); the existing fetch path surfaces those as errors, so the
+ * gate just lets the fetch proceed and report the real problem.
+ */
+export function findRootRowsBinding(
+  binding: Binding,
+  dashboard: Dashboard,
+): RowsBinding | null {
+  const visiting = new Set<string>();
+  let cur: Binding | undefined = binding;
+  while (cur) {
+    if (cur.type === "rows") return cur;
+    if (visiting.has(cur.source)) return null;
+    visiting.add(cur.source);
+    cur = dashboard.data[cur.source];
+  }
+  return null;
+}
+
 /** Read a dotted path out of a value, returning undefined if any segment is missing. */
 export function readPath(obj: unknown, path: string): unknown {
   if (!path) return obj;

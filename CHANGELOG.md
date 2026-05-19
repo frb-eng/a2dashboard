@@ -6,6 +6,22 @@ release notes per tag.
 
 ## Unreleased
 
+- **Required-param fetch gate — no spec change, no "missing path param"
+  on master-detail mount.** The master-detail right panel was
+  previously documented as "starts in an error state until the user
+  clicks a row; that is expected" — bad UX baked into the contract.
+  The renderer now derives the gate from existing data: if the
+  underlying rows binding's endpoint call binds a *required* catalog
+  param to a `{ stateKey }` whose slot is empty, `useRows` holds the
+  fetch and returns `idle: true` with the pending state keys. The
+  table renders "Waiting for &lt;slot&gt;…" instead of throwing. The
+  `setStateAndRefresh` action already writes the slot and bumps the
+  refresh tick in one step, so the gate opens automatically on the row
+  click; no new primitive in the spec, no new `RefreshPolicy` variant
+  — the catalog's `required` flag is the only source of truth.
+  `useRows` walks the binding's `source` chain to its underlying
+  `rows` binding, so the gate works for filter chains too.
+
 - **Third catalogued endpoint — `github.repoContributors`.** `GET
   /repos/{owner}/{repo}/contributors` joins `userRepos` and
   `repoIssues` in the hardcoded catalog. Paginated, ordered by commit
