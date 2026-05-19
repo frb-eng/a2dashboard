@@ -505,7 +505,18 @@ In practice, a small MVP dashboard JSON is a single `table` bound to one of the 
 
 | Version | Date | Theme | Highlights |
 |---|---|---|---|
+| **[v0.0.2](https://github.com/frb-eng/a2dashboard/releases/tag/v0.0.2)** | 2026-05-19 | Composable, interactive dashboards | Ten a2ui-aligned UI primitives (layout containers, grouping containers, display + interactive leaves) · recursive table cells (any UI node inside any cell) · first aggregation primitive (`filter` op `containsIgnoreCase`) · shared client-side state map driven by `textField`, applied by `button` action `refresh` · LLM emits flat `componentEntries[]` + `uiRootId`, server resolves into the renderer-friendly tree with cycle checks |
 | **[v0.0.1](https://github.com/frb-eng/a2dashboard/releases/tag/v0.0.1)** | 2026-05-18 | Conversational, multi-session iteration | Chat-based iteration that patches (not rewrites) the spec, preserving ids · multiple parallel dashboards switchable from a sidebar, persisted to `localStorage` · assistant can reply textually when a request is ambiguous or needs primitives/endpoints that don't exist yet |
+
+### What v0.0.2 delivers
+
+A user can now describe a *composable, interactive* dashboard — multi-panel layouts, tabs, cards, free-text search with an Apply button — and watch it render live against the GitHub REST API. The renderer's vocabulary grew from one primitive to ten, the data layer gained its first aggregation operator, and dashboards stopped being read-only.
+
+- Ten UI primitives, all aligned with Google's a2ui basic catalog: `table`, `row` / `column` / `list` (layout), `card` / `tabs` (grouping), `text` / `icon` (display leaves), and `textField` / `button` (interactive leaves).
+- Recursive table cells: every `TableColumn` carries either a `field` path or a nested `cell` UI node, so any subtree — including icon-plus-bound-text or stacked-line cells — can live inside any cell. Cell subtrees resolve `field` against the row through a React context.
+- First aggregation primitive — `filter` (op `containsIgnoreCase`). Filters chain through `source`, accept literal or `{ stateKey }` values, and are evaluated inside `useRows` so they re-apply on button-triggered refresh.
+- Shared client-side state map driven by `textField` (writes a slot named by `stateKey`) and consumed by endpoint params and filter bindings declared as `{ stateKey }`. `button` action `refresh` bumps a shared tick and re-fires every binding against the current state — typing alone does NOT refetch.
+- Flat-components intermediate: the LLM emits `componentEntries[]` + `uiRootId` (children referenced by `childIds`, `childId`, `tabs[].childId`, column `cellId`); the server resolves the flat form into the renderer-friendly tree with cycle and dangling-reference checks. Sidesteps OpenAI strict mode's recursive-schema limits.
 
 ### What v0.0.1 delivers
 
