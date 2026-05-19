@@ -225,11 +225,31 @@ type IntermediateComponent =
   | IntermediateTextFieldComponent
   | IntermediateButtonComponent;
 
-interface IntermediateBinding {
+interface IntermediateRowsBinding {
   type: "rows";
   endpoint: string;
   rowsPath: string | null;
 }
+
+const FILTER_OP_VALUES = ["containsIgnoreCase"] as const;
+type IntermediateFilterOp = (typeof FILTER_OP_VALUES)[number];
+
+/**
+ * Filter binding in the LLM-emitted form. `value` and `stateKey` use
+ * the same exactly-one-non-null discipline as endpoint params — the
+ * server flattens them into the public `string | number | boolean |
+ * StateRef` union in `toDashboard` below.
+ */
+interface IntermediateFilterBinding {
+  type: "filter";
+  source: string;
+  field: string;
+  op: IntermediateFilterOp;
+  value: string | number | boolean | null;
+  stateKey: string | null;
+}
+
+type IntermediateBinding = IntermediateRowsBinding | IntermediateFilterBinding;
 
 /**
  * Endpoint param value carried in the LLM-emitted intermediate form.
@@ -459,6 +479,39 @@ function componentSchema(): Record<string, unknown> {
   };
 }
 
+function rowsBindingSchema(): Record<string, unknown> {
+  return {
+    type: "object",
+    additionalProperties: false,
+    required: ["type", "endpoint", "rowsPath"],
+    properties: {
+      type: { type: "string", enum: ["rows"] },
+      endpoint: { type: "string" },
+      rowsPath: { type: ["string", "null"] },
+    },
+  };
+}
+
+function filterBindingSchema(): Record<string, unknown> {
+  return {
+    type: "object",
+    additionalProperties: false,
+    required: ["type", "source", "field", "op", "value", "stateKey"],
+    properties: {
+      type: { type: "string", enum: ["filter"] },
+      source: { type: "string" },
+      field: { type: "string" },
+      op: { type: "string", enum: [...FILTER_OP_VALUES] },
+      value: { type: ["string", "number", "boolean", "null"] },
+      stateKey: { type: ["string", "null"] },
+    },
+  };
+}
+
+function bindingSchema(): Record<string, unknown> {
+  return { anyOf: [rowsBindingSchema(), filterBindingSchema()] };
+}
+
 function dashboardObjectSchema(): Record<string, unknown> {
   const endpointIds = githubCatalog.map((e) => e.id);
   return {
@@ -496,16 +549,7 @@ function dashboardObjectSchema(): Record<string, unknown> {
           required: ["id", "binding"],
           properties: {
             id: { type: "string" },
-            binding: {
-              type: "object",
-              additionalProperties: false,
-              required: ["type", "endpoint", "rowsPath"],
-              properties: {
-                type: { type: "string", enum: ["rows"] },
-                endpoint: { type: "string" },
-                rowsPath: { type: ["string", "null"] },
-              },
-            },
+            binding: bindingSchema(),
           },
         },
       },
@@ -644,16 +688,19 @@ THREE-LAYER MODEL (when producing a dashboard)
      button variant   ∈ ${BUTTON_VARIANT_VALUES.map((v) => `"${v}"`).join(" | ")}.
      icon name ∈ ${ICON_NAME_VALUES.map((v) => `"${v}"`).join(" | ")}.
 
-  2. dataEntries — bindings that name how rows are produced. MVP: only \`rows\` bindings that pass an endpoint response through unchanged.
+  2. dataEntries — bindings that name how rows are produced. Two variants:
+       - \`rows\`   — fetch from an endpoint and pass the response array through unchanged. Fields: \`endpoint\` (endpoint entry id), \`rowsPath\` (dotted path into the response body when the array isn't at the top level; null for the catalogued GitHub endpoints).
+       - \`filter\` — keep only rows from another binding whose \`field\` matches \`value\`. Fields: \`source\` (id of another binding in dataEntries — typically a \`rows\` binding, but filters can chain), \`field\` (dotted path into each row, e.g. "title" or "user.login"), \`op\` ("containsIgnoreCase" — the only MVP operator), and exactly one of \`value\` (literal scalar) / \`stateKey\` (textField slot, resolved at fetch time). Use \`filter\` for client-side search-style filtering when the GitHub endpoint can't express the predicate as a query param (e.g. text search over issue titles — \`labels\` is server-side, free-text isn't).
   3. endpointEntries — concrete invocations of catalogued endpoints (id + params + refresh). Each param is { name, value, stateKey } where EXACTLY ONE of \`value\` (literal scalar) and \`stateKey\` (name of a textField slot, read at fetch time) is non-null.
 
 Cross-layer references use string ids and names:
   - uiRootId must equal some componentEntries[*].id
   - childIds[*], childId, tabs[*].childId, and columns[*].cellId must each equal some componentEntries[*].id (when not null)
   - table.rows must equal some dataEntries[*].id
-  - dataEntries[*].binding.endpoint must equal some endpointEntries[*].id
+  - filter binding \`source\` must equal some other dataEntries[*].id (and must not form a cycle)
+  - rows binding \`endpoint\` must equal some endpointEntries[*].id
   - endpointEntries[*].call.endpointId must equal a catalogued endpoint id
-  - endpoint param \`stateKey\` must equal a textField's \`stateKey\` somewhere in the UI tree
+  - endpoint param \`stateKey\` and filter binding \`stateKey\` must each equal a textField's \`stateKey\` somewhere in the UI tree
 
 ENDPOINT CATALOG (the only endpoints you may use):
 
@@ -668,6 +715,7 @@ GUIDANCE
   - When composing a custom cell, put a \`row\` (for icon+text) or \`column\` (for stacked lines) at \`cellId\` and reference \`text\` / \`icon\` leaves from there. \`text\` inside a cell uses \`field\` to read the row.
   - Reach for \`textField\` + \`button\` when the user wants the dashboard to be interactive — e.g. "let me type a GitHub username and show their repos", "let me filter issues by label". The standard pattern is a \`column\` holding one or more \`textField\`s, a primary \`button\` whose action is { kind: "refresh" }, and the data \`table\` underneath. The button is the explicit "go" — endpoints do NOT refetch on every keystroke, only when the button is pressed or on mount.
   - When a textField feeds an endpoint param, give the textField a sensible \`defaultValue\` so the dashboard renders something on mount. Set the matching endpoint param's \`value\` to null and its \`stateKey\` to the textField's stateKey.
+  - When the user wants free-text search over rows ("search issues by title pattern", "find repos whose name contains X"), use a \`filter\` binding with op "containsIgnoreCase". The table's \`rows\` then points at the filter binding; the filter's \`source\` points at the underlying \`rows\` binding. The filter's \`stateKey\` matches the search textField. The button's \`refresh\` action re-evaluates the filter at the same time it refetches data — an empty search field matches every row, so omit \`defaultValue\` on the search textField when you want everything visible on mount.
   - A button's \`childId\` is typically a \`text\` leaf ("Search", "Refresh", "Load"). For icon-only buttons, point \`childId\` at an \`icon\`.
   - For tables: pick 4–7 useful columns. Column \`field\` is a dotted path into the row object (e.g. "owner.login").
   - Use null for title, justify, align, direction, rowsPath when not needed; the catalogued endpoints return arrays at the top level so rowsPath is usually null.
@@ -808,6 +856,30 @@ function buildUITree(
   }
 }
 
+function toBinding(
+  id: string,
+  b: IntermediateBinding,
+): Dashboard["data"][string] {
+  switch (b.type) {
+    case "rows":
+      return {
+        type: "rows",
+        endpoint: b.endpoint,
+        ...(b.rowsPath ? { rowsPath: b.rowsPath } : {}),
+      };
+    case "filter": {
+      if (b.stateKey == null && b.value == null) {
+        throw new Error(
+          `Filter binding "${id}" has neither a literal value nor a stateKey.`,
+        );
+      }
+      const value =
+        b.stateKey != null ? { stateKey: b.stateKey } : (b.value as string | number | boolean);
+      return { type: "filter", source: b.source, field: b.field, op: b.op, value };
+    }
+  }
+}
+
 function toDashboard(i: IntermediateDashboard): Dashboard {
   const byId = new Map<string, IntermediateComponent>();
   for (const e of i.componentEntries) {
@@ -822,14 +894,7 @@ function toDashboard(i: IntermediateDashboard): Dashboard {
     title: i.title,
     ui,
     data: Object.fromEntries(
-      i.dataEntries.map((e) => [
-        e.id,
-        {
-          type: e.binding.type,
-          endpoint: e.binding.endpoint,
-          ...(e.binding.rowsPath ? { rowsPath: e.binding.rowsPath } : {}),
-        },
-      ]),
+      i.dataEntries.map((e) => [e.id, toBinding(e.id, e.binding)]),
     ),
     endpoints: Object.fromEntries(
       i.endpointEntries.map((e) => [

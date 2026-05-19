@@ -8,6 +8,23 @@ release notes per tag.
 
 ### Added
 
+- **Filter binding — first aggregation primitive.** The data layer
+  gains a typed `filter` variant: `{ type: "filter", source, field, op,
+  value }` keeps only rows from another binding whose `field` matches
+  `value`, where `value` is either a literal or a `{ stateKey }` ref so
+  a `textField` can drive the predicate. MVP op is `containsIgnoreCase`
+  (case-insensitive substring); future operators (equals / gt / in /
+  etc.) land as new enum values, never as free-form expressions.
+  Filters chain through `source`, so a search filter can sit on top of
+  a label filter on top of a raw `rows` binding. Cycles and dangling
+  references are caught in the renderer's aggregation engine.
+
+  Unlocks the canonical "search input + Apply button + table" dashboard
+  (e.g. search issues in `facebook/react` by title): the textField
+  writes to a state slot, the filter reads it, and the button's
+  `refresh` action re-evaluates the filter (and refetches) at the same
+  time. Typing alone does NOT re-filter — the button stays the
+  explicit "go".
 - **Interactive leaves.** Two new UI primitives — `textField` and
   `button` — inspired by a2ui's basic-catalog `TextField` and `Button`,
   let the LLM build interactive dashboards (e.g. "type a GitHub user,

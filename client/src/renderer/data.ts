@@ -1,12 +1,17 @@
 /**
- * Endpoint resolution + fetch — the (currently minimal) aggregation engine.
+ * Endpoint resolution + fetch + the aggregation engine.
  *
- * Two responsibilities:
+ * Three responsibilities:
  *   1. Take an `EndpointCall` (catalog id + params) and produce a concrete
  *      URL by substituting path params into the catalogued template and
  *      appending the rest as query string.
  *   2. Fetch that URL and pull rows out of the response, honoring the
  *      binding's optional `rowsPath`.
+ *   3. Evaluate the data-aggregation binding tree: a `rows` binding goes
+ *      straight to (1)+(2); a `filter` binding recursively evaluates its
+ *      source and then keeps only the rows matching its predicate.
+ *      Cycles and dangling references are caught here; new operators
+ *      (group / agg / join) land as new switch arms.
  *
  * The catalog is fetched from the server once per session (the server is
  * the source of truth for URL templates and param locations) and cached.
@@ -18,6 +23,8 @@ import type {
   Dashboard,
   EndpointCall,
   EndpointParamValue,
+  FilterBinding,
+  RowsBinding,
 } from "../spec";
 
 /**
@@ -111,17 +118,11 @@ export function readPath(obj: unknown, path: string): unknown {
   return cur;
 }
 
-/**
- * Resolve a binding to an array of row objects.
- *
- * For MVP the only binding kind is `rows`: hit the endpoint, optionally
- * descend `rowsPath`, and return the resulting array.
- */
-export async function fetchRows(
-  binding: Binding,
+async function fetchRowsBinding(
+  binding: RowsBinding,
   dashboard: Dashboard,
   catalog: CatalogEntry[],
-  resolveState: StateResolver | null = null,
+  resolveState: StateResolver | null,
 ): Promise<Record<string, unknown>[]> {
   const call = dashboard.endpoints[binding.endpoint];
   if (!call) {
@@ -149,4 +150,73 @@ export async function fetchRows(
     );
   }
   return rows as Record<string, unknown>[];
+}
+
+function applyFilter(
+  rows: Record<string, unknown>[],
+  binding: FilterBinding,
+  resolveState: StateResolver | null,
+): Record<string, unknown>[] {
+  const needleRaw = resolveParam(binding.value, resolveState);
+  const needle = String(needleRaw);
+  // An empty needle matches everything — typical "no filter active" UX.
+  if (needle === "") return rows;
+
+  switch (binding.op) {
+    case "containsIgnoreCase": {
+      const n = needle.toLowerCase();
+      return rows.filter((row) => {
+        const v = readPath(row, binding.field);
+        if (v == null) return false;
+        return String(v).toLowerCase().includes(n);
+      });
+    }
+  }
+}
+
+/**
+ * Resolve a binding tree to an array of row objects. Dispatches on the
+ * binding's `type` discriminator; `filter` recurses into its `source`.
+ *
+ * `visiting` guards against cycles in the binding graph — a `filter`
+ * whose `source` (directly or transitively) names itself would otherwise
+ * spin forever.
+ */
+export async function fetchRows(
+  binding: Binding,
+  dashboard: Dashboard,
+  catalog: CatalogEntry[],
+  resolveState: StateResolver | null = null,
+  visiting: Set<string> = new Set(),
+): Promise<Record<string, unknown>[]> {
+  switch (binding.type) {
+    case "rows":
+      return fetchRowsBinding(binding, dashboard, catalog, resolveState);
+    case "filter": {
+      const source = dashboard.data[binding.source];
+      if (!source) {
+        throw new Error(
+          `Filter binding references unknown source id "${binding.source}".`,
+        );
+      }
+      if (visiting.has(binding.source)) {
+        throw new Error(
+          `Binding cycle detected at filter source "${binding.source}".`,
+        );
+      }
+      visiting.add(binding.source);
+      try {
+        const upstream = await fetchRows(
+          source,
+          dashboard,
+          catalog,
+          resolveState,
+          visiting,
+        );
+        return applyFilter(upstream, binding, resolveState);
+      } finally {
+        visiting.delete(binding.source);
+      }
+    }
+  }
 }

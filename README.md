@@ -357,6 +357,85 @@ field updates the slot; clicking the button bumps the refresh tick and
 the table reloads against the new value. No keystroke fetches the
 network on its own — the button is the explicit "go".
 
+## Bindings
+
+The `data` map holds the bindings that produce rows for tables. Each
+binding is a typed primitive — never a free-form expression — so the
+renderer's evaluator stays finite and reviewable. New operators (group
+/ aggregate / join / time-bucket) land as new variants.
+
+| Binding | What it produces | Key fields |
+|---|---|---|
+| `rows` | Raw rows from a catalogued endpoint. The response is treated as the row array, or descended via `rowsPath` when it isn't already an array. | `endpoint` (endpoint entry id), `rowsPath?` |
+| `filter` | Rows from another binding, keeping only those whose `field` matches `value`. Chains: a filter's `source` can itself be another filter. Evaluated inside the same hook as the data fetch, so it re-runs on `button`-triggered refresh — typing alone does NOT re-filter. | `source` (id of another binding), `field` (dotted path), `op`, `value` (literal or `{ stateKey }`) |
+
+`filter op` ∈ `containsIgnoreCase`. Case-insensitive substring match
+against `String(row[field])`. An empty `value` (e.g. an unfilled
+search `textField`) matches every row, so the table shows everything
+on mount when the search field has no `defaultValue`.
+
+### Worked example: search issues in a repo
+
+The user's "search input + Apply button + table of React issues"
+dashboard ties together all the moving parts — a `textField` for the
+query, a `button` whose `refresh` action both re-fetches and
+re-evaluates the filter, a `rows` binding that pulls every open issue
+from `facebook/react`, and a `filter` binding that narrows them by
+title:
+
+```jsonc
+{
+  "ui": {
+    "type": "column",
+    "id": "root",
+    "children": [
+      { "type": "textField", "id": "search_input", "label": "Search issues",
+        "stateKey": "issue_query", "placeholder": "e.g. hydration",
+        "variant": "shortText" },
+      { "type": "button", "id": "apply",
+        "child": { "type": "text", "id": "apply_label", "text": "Apply" },
+        "variant": "primary", "action": { "kind": "refresh" } },
+      { "type": "table", "id": "issues", "rows": "filtered_issues",
+        "columns": [
+          { "id": "number", "header": "#",      "field": "number" },
+          { "id": "title",  "header": "Title",  "field": "title" },
+          { "id": "user",   "header": "Author", "field": "user.login" },
+          { "id": "comments", "header": "Comments", "field": "comments" }
+        ]
+      }
+    ]
+  },
+  "data": {
+    "all_react_issues": { "type": "rows", "endpoint": "react_issues_call" },
+    "filtered_issues":  {
+      "type": "filter",
+      "source": "all_react_issues",
+      "field":  "title",
+      "op":     "containsIgnoreCase",
+      "value":  { "stateKey": "issue_query" }
+    }
+  },
+  "endpoints": {
+    "react_issues_call": {
+      "endpointId": "github.repoIssues",
+      "params": {
+        "owner":    "facebook",
+        "repo":     "react",
+        "state":    "open",
+        "per_page": 100
+      },
+      "refresh": { "kind": "on-mount" }
+    }
+  }
+}
+```
+
+On mount the table shows every open `facebook/react` issue (empty
+search ⇒ filter is a no-op). The user types `hydration`, clicks
+**Apply**, and the table refetches and re-narrows to issues whose
+title matches "hydration" (case-insensitive). Clear the field and
+press **Apply** again to see everything.
+
 ## Supported data sources
 
 The endpoint catalog is hardcoded in `server/src/catalog/github.ts`
@@ -415,10 +494,10 @@ Row fields commonly used in column bindings: `number`, `title`,
 The current implementation is deliberately narrow — just enough surface area to validate the three-layer model end-to-end. Everything else (charts, KPIs, aggregations, more endpoints, alternative renderers) lands as a named extension to this MVP, not by quietly widening it.
 
 - **UI:** the ten primitives listed under [Supported components](#supported-components). Rendered with React + MUI.
-- **Aggregation:** none — bindings map endpoint response rows directly to table columns.
+- **Aggregation:** the two bindings listed under [Bindings](#bindings) — `rows` for raw endpoint responses and `filter` (op `containsIgnoreCase`) for client-side text filtering. No `group` / `agg` / `join` / `time-bucket` yet.
 - **Endpoint catalog:** the two GitHub endpoints listed under [Supported data sources](#supported-data-sources). Pagination is the only data-side behavior; refresh policy is `on-mount` or `manual`. Endpoint param values may also be `{ stateKey }` references that resolve against `textField` slots at fetch time, making a button-driven "type → search" dashboard expressible without any code escape hatch.
 
-In practice, a small MVP dashboard JSON is a single `table` bound to one of the catalogued endpoints; a richer one composes several tables under a `row`, `column`, `tabs`, or `card`; an interactive one adds a `textField` + `button` row whose state feeds the endpoint params.
+In practice, a small MVP dashboard JSON is a single `table` bound to one of the catalogued endpoints; a richer one composes several tables under a `row`, `column`, `tabs`, or `card`; an interactive one adds a `textField` + `button` row whose state feeds either an endpoint param (refetch on apply) or a `filter` binding (re-narrow on apply).
 
 ## Milestones
 

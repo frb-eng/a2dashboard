@@ -13,7 +13,7 @@
  */
 
 import { useCallback, useEffect, useState } from "react";
-import type { Binding, Dashboard, EndpointCall } from "../spec";
+import type { Binding, Dashboard } from "../spec";
 import { fetchRows, loadCatalog } from "./data";
 import { useDashboardState } from "./DashboardStateContext";
 
@@ -36,11 +36,6 @@ export function useRows(
   const { getValue, refreshTick } = useDashboardState();
 
   const refresh = useCallback(() => setTick((t) => t + 1), []);
-
-  const call: EndpointCall | undefined = binding
-    ? dashboard.endpoints[binding.endpoint]
-    : undefined;
-  const policy = call?.refresh.kind ?? "on-mount";
 
   useEffect(() => {
     if (!binding) return;
@@ -67,14 +62,11 @@ export function useRows(
     // dashboard-wide button-triggered refreshes; the binding/dashboard
     // identity changes when a new dashboard is generated. `getValue` is
     // read inside the async block — we don't depend on it directly so
-    // keystrokes alone don't refire.
+    // keystrokes alone don't refire (a `filter` binding's state ref is
+    // resolved at fetch time, so this is what gives the user the
+    // "button applies the filter" UX).
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [binding, dashboard, tick, refreshTick]);
-
-  // `policy` is currently informational — `on-mount` is implicit in the
-  // effect above and `manual` is honored by exposing `refresh`. Surfaced
-  // here so the caller can decide whether to render a refresh control.
-  void policy;
 
   return { rows, loading, error, refresh };
 }

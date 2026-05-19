@@ -182,7 +182,26 @@ export interface RowsBinding {
   rowsPath?: string;
 }
 
-export type Binding = RowsBinding;
+/** MVP filter operator. See server spec for the growth path. */
+export type FilterOp = "containsIgnoreCase";
+
+/**
+ * Transforms another binding's rows by keeping only those whose `field`
+ * matches `value`. Evaluated inside `useRows`, so it re-runs on the
+ * dashboard's refresh tick — pressing a `button` with action `refresh`
+ * is the "apply" trigger. Typing into the source `textField` alone does
+ * NOT re-filter.
+ */
+export interface FilterBinding {
+  type: "filter";
+  /** Id of another binding in `Dashboard.data` whose rows we transform. */
+  source: string;
+  field: string;
+  op: FilterOp;
+  value: string | number | boolean | StateRef;
+}
+
+export type Binding = RowsBinding | FilterBinding;
 
 export type RefreshPolicy =
   | { kind: "manual" }
