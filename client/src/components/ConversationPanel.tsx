@@ -31,6 +31,7 @@ const EXAMPLES: string[] = [
   "Recently updated repositories of @anthropics",
   "I want to see the open issues for react, angular and vue projects.",
   "I want a search input where I can type a pattern. A button to apply my search criteria and below a table of issues in react project. So a issue search dashboard for react repo.",
+  "In the left column I want to see the anthropics repositories. Clicking one of them shows in the right column the list of contributors.",
 ];
 
 interface ConversationPanelProps {
