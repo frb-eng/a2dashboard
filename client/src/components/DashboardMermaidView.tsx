@@ -30,6 +30,26 @@ mermaid.initialize({
 
 const sourceCache = new WeakMap<Dashboard, string>();
 
+/**
+ * Best-effort cleanup of an LLM-produced mermaid string.
+ *
+ *  - Strip a leading/trailing ```mermaid fence if the model wraps the
+ *    source in one despite being told not to.
+ *  - Normalise any non-breaking spaces the model occasionally emits.
+ *  - Trim surrounding whitespace.
+ *
+ * Anything subtler than this (e.g. fixing nested shape brackets) is left
+ * to the mermaid parser — render errors surface to the user with a
+ * "Regenerate" button so they can ask the model to retry.
+ */
+function sanitizeMermaidSource(raw: string): string {
+  let s = raw.replace(/ /g, " ").trim();
+  const fence = /^```(?:mermaid)?\s*\n([\s\S]*?)\n```$/i;
+  const m = fence.exec(s);
+  if (m) s = m[1].trim();
+  return s;
+}
+
 interface Props {
   dashboard: Dashboard;
 }
@@ -61,8 +81,9 @@ export function DashboardMermaidView({ dashboard }: Props) {
     generateMermaid(dashboard)
       .then((r) => {
         if (cancelled) return;
-        sourceCache.set(dashboard, r.mermaid);
-        setSource(r.mermaid);
+        const clean = sanitizeMermaidSource(r.mermaid);
+        sourceCache.set(dashboard, clean);
+        setSource(clean);
       })
       .catch((e: unknown) => {
         if (cancelled) return;
@@ -111,8 +132,9 @@ export function DashboardMermaidView({ dashboard }: Props) {
     setError(null);
     generateMermaid(dashboard)
       .then((r) => {
-        sourceCache.set(dashboard, r.mermaid);
-        setSource(r.mermaid);
+        const clean = sanitizeMermaidSource(r.mermaid);
+        sourceCache.set(dashboard, clean);
+        setSource(clean);
       })
       .catch((e: unknown) => {
         setError(e instanceof Error ? e.message : String(e));

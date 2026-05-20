@@ -43,49 +43,61 @@ function systemPrompt(): string {
 OUTPUT
   - Return JSON: { "mermaid": "<the full mermaid source, including the leading \\"flowchart LR\\" line>" }.
   - No code fences, no prose, no explanation — just the mermaid source string inside the JSON field.
-  - Use \`flowchart LR\` (left-to-right). Group nodes into \`subgraph\` blocks: one per layer — "UI", "Data bindings", "Endpoints", "State slots". Omit a subgraph only when that layer is empty.
+  - Use \`flowchart LR\` (left-to-right). Group nodes into \`subgraph\` blocks: one per layer — \`UI\`, \`Data\`, \`Endpoints\`, \`State\`. Omit a subgraph only when that layer is empty. Use single-word subgraph ids (no quotes, no spaces) — \`subgraph UI\` not \`subgraph "UI"\`.
+
+NODE SHAPES — USE EXACTLY THESE, NOTHING ELSE
+  Mermaid's bracket grammar is strict. Pick ONE shape per layer and do not mix or nest brackets. Any deviation (e.g. \`[/(...)/]\`, \`([(...)])\`, \`[[(...)]]\`) is a parse error.
+  - UI nodes:      \`ui_<id>["<label>"]\`             (rectangle)
+  - Data bindings: \`bind_<id>(["<label>"])\`          (stadium)
+  - Endpoints:     \`ep_<id>[("<label>")]\`            (cylinder)
+  - State slots:   \`state_<key>(("<label>"))\`        (circle)
+
+  Every label MUST be wrapped in straight double quotes immediately inside the brackets. Do NOT add extra parentheses, slashes, braces, or backticks inside the brackets. Each node declaration occupies its own line. The opening and closing bracket sequences must match exactly as shown above.
 
 EVERY COMPONENT IN THE SPEC MUST APPEAR AS A NODE
-  - UI layer: every node in \`ui\` — table, barChart, row, column, list, card, tabs (one node per tab title), text, icon, textField, button — including layout containers and leaves like text/icon with no data binding. Use a stable node id derived from the component's \`id\` (prefix with \`ui_\`). The label should read \`<type>: <id>\` on the first line and, when present, the component's title / text / label / icon name / button child text on the second line. Suggested shapes:
-      * table       — \`ui_<id>["table: <id><br/><title>"]\`
-      * barChart    — \`ui_<id>["barChart: <id><br/><title>"]\`
-      * row/column/list — \`ui_<id>{{"<type>: <id>"}}\` (hex shape, distinguishes containers)
-      * card        — \`ui_<id>[["card: <id><br/><title>"]]\`
-      * tabs        — \`ui_<id>[/"tabs: <id>"/]\` and one child node per tab labelled with the tab title
-      * text        — \`ui_<id>("text: <id><br/>&quot;<text>&quot;")\` (or \`field: <field>\` when field is set)
-      * icon        — \`ui_<id>("icon: <name>")\`
-      * textField   — \`ui_<id>[/"textField: <id><br/><label>"/]\`
-      * button      — \`ui_<id>(["button: <id><br/><child text>"])\`
-  - Data bindings: every entry in \`data\` — rows, filter, sort, limit, union, group. Node id prefixed with \`bind_\`. Label \`<type>: <id>\` plus the key fields on a second line (\`endpoint: <id>\` for rows, \`source: <id>\` for filter/sort/limit/group, \`sources: a,b,c\` for union, plus the field/op/count/direction/groupBy/as/tagField that applies). Shape: \`bind_<id>([...])\` (stadium).
-  - Endpoints: every entry in \`endpoints\`. Node id prefixed with \`ep_\`. Label \`<entryId><br/><endpointId>\` and a third line summarising the resolved params (e.g. \`owner=facebook, repo=react\` for literals, \`username={stateKey:user}\` for state refs). Shape: \`ep_<id>[(...)]\` (cylinder).
-  - State slots: collect every distinct \`stateKey\` referenced anywhere in the spec — every textField's \`stateKey\`, every endpoint param \`{ stateKey }\`, every filter binding \`{ stateKey }\`, every \`setStateAndRefresh\` action's \`stateKey\`. One node per slot, id prefixed with \`state_\`. Label is just the slot name. Shape: \`state_<key>(("<key>"))\` (circle).
+  - UI layer: emit one rectangle for every node found by walking the \`ui\` tree — \`table\`, \`barChart\`, \`row\`, \`column\`, \`list\`, \`card\`, \`tabs\`, \`text\`, \`icon\`, \`textField\`, \`button\`. Recurse into \`children\`, \`child\`, \`tabs[].child\`, and every table column's \`cell\` subtree. The label has two lines:
+      * line 1: \`<type>: <id>\`
+      * line 2 (when present): the most identifying field — \`title\` for table/barChart/card/tabs/row/column/list; \`text\` (or \`field: <field>\`) for text; \`name\` for icon; \`label\` for textField; the button's child text for button.
+    Table columns themselves are NOT UI components — do NOT emit a node per column. Instead include the column headers as extra lines on the parent table label, e.g. \`table: issues<br/>columns: # · title · state\`. The column's \`cell\` subtree, when set, IS a UI node and is emitted as usual under the table.
+  - Data layer: emit one stadium for every entry in \`data\` (\`rows\`, \`filter\`, \`sort\`, \`limit\`, \`union\`, \`group\`). Label is two lines:
+      * line 1: \`<type>: <id>\`
+      * line 2: the key fields — for \`rows\` \`endpoint: <id>\`; for \`filter\` \`field=<field>, op=<op>, value=<literal or {stateKey:<key>}>\`; for \`sort\` \`field=<field>, dir=<direction>\`; for \`limit\` \`count=<n>\`; for \`union\` \`tagField=<tagField>\`; for \`group\` \`groupBy=<groupBy>, op=<op>, as=<as>\`.
+  - Endpoints layer: emit one cylinder for every entry in \`endpoints\`. Label is three lines:
+      * \`<entryId>\`
+      * \`<endpointId>\` (e.g. \`github.repoIssues\`)
+      * a comma-separated summary of resolved params: literals as \`name=<value>\`, state refs as \`name={stateKey:<key>}\`.
+  - State layer: collect every distinct \`stateKey\` referenced anywhere — \`textField.stateKey\`, endpoint param \`{ stateKey }\`, filter binding \`{ stateKey }\`, action \`setStateAndRefresh.stateKey\`. Emit one circle per slot, labelled with the slot name.
 
 EDGES — show every cross-layer reference
-  - UI → Data: for every \`table\` and \`barChart\`, add \`ui_<id> -- "rows" --> bind_<rowsId>\`.
-  - UI containment: layout containers (\`row\`, \`column\`, \`list\`, \`card\`, \`tabs\`, \`button\`, and table column \`cell\` subtrees) → their children. Use a plain arrow \`ui_<parent> --> ui_<child>\` (no edge label) so the UI tree is visible without crowding.
-  - For \`tabs\`, also draw one labelled edge per tab from the tabs node to the tab child: \`ui_<tabs> -- "<tab title>" --> ui_<child>\`.
-  - For \`table.onRowClick\` with kind \`setStateAndRefresh\`: \`ui_<table> -. "setState <valueField>" .-> state_<stateKey>\` (dotted arrow — it's a write triggered on click, not a data flow).
-  - For \`button.action\`: kind \`refresh\` → no edge needed; kind \`setStateAndRefresh\` → \`ui_<button> -. "setState <valueField>" .-> state_<stateKey>\`.
-  - For \`textField\`: \`ui_<textField> -. "writes" .-> state_<stateKey>\`.
-  - Data → Data: for every \`filter\`, \`sort\`, \`limit\`, \`group\` binding draw \`bind_<id> -- "source" --> bind_<sourceId>\`. For every \`union\` draw one edge per source: \`bind_<id> -- "<tag>" --> bind_<sourceId>\`.
-  - Data → Endpoint: for every \`rows\` binding draw \`bind_<id> -- "endpoint" --> ep_<endpointId>\`.
-  - Endpoint → State: for every endpoint param whose value is \`{ stateKey }\`, draw \`ep_<id> -. "<paramName}" .-> state_<stateKey>\`.
-  - Filter → State: when a \`filter\` binding's value is \`{ stateKey }\`, draw \`bind_<id> -. "value" .-> state_<stateKey>\`.
+  - UI containment: for every layout parent (\`row\`, \`column\`, \`list\`, \`card\`, \`tabs\`, \`button\`, table column \`cell\` subtrees) emit one plain arrow per child: \`ui_<parent> --> ui_<child>\`. No edge label, so the tree stays legible.
+  - Tabs: in addition to the plain containment arrow per tab, emit one labelled arrow per tab: \`ui_<tabs> -- "<tab title>" --> ui_<child>\`.
+  - UI → Data: for every \`table\` and \`barChart\`, emit \`ui_<id> -- "rows" --> bind_<rowsId>\`.
+  - UI → State writes (dotted arrows):
+      * \`textField\`: \`ui_<id> -. "writes" .-> state_<stateKey>\`
+      * \`button\` with \`action.kind === "setStateAndRefresh"\`: \`ui_<id> -. "setState <valueField>" .-> state_<stateKey>\`
+      * \`table\` with \`onRowClick.kind === "setStateAndRefresh"\`: \`ui_<id> -. "onRowClick <valueField>" .-> state_<stateKey>\`
+      * \`button\` with \`action.kind === "refresh"\`: no edge needed.
+  - Data → Data: every \`filter\`/\`sort\`/\`limit\`/\`group\` binding emits \`bind_<id> -- "source" --> bind_<sourceId>\`. Every \`union\` emits one edge per entry in \`sources\`: \`bind_<id> -- "<tag>" --> bind_<sourceId>\`.
+  - Data → Endpoint: every \`rows\` binding emits \`bind_<id> -- "endpoint" --> ep_<endpointId>\`.
+  - Endpoint → State (dotted): for every endpoint param whose value is \`{ stateKey }\`, emit \`ep_<id> -. "<paramName>" .-> state_<stateKey>\`.
+  - Filter → State (dotted): when a \`filter\` binding's value is \`{ stateKey }\`, emit \`bind_<id> -. "value" .-> state_<stateKey>\`.
 
 LABEL HYGIENE
-  - Wrap every label in double quotes so spaces, colons, and special characters are safe.
-  - Inside labels, use \`<br/>\` for line breaks. Escape any literal double-quote in the source data as \`&quot;\`.
-  - Node ids must be alphanumeric / underscores only — sanitise the component / binding / endpoint / state ids by replacing any non-\`[A-Za-z0-9_]\` character with \`_\`. Always keep the layer prefix (\`ui_\` / \`bind_\` / \`ep_\` / \`state_\`).
-  - When a component has no title / text / label, omit the second line — never emit empty \`<br/>\` or the literal word \`null\`.
+  - Every label is wrapped in straight \`"\` quotes immediately inside the shape brackets. No backticks, no smart quotes, no markdown-string syntax.
+  - Inside a label, use \`<br/>\` for line breaks. Escape any literal \`"\` inside the source data as \`&quot;\`. Escape \`#\` (which mermaid treats as an entity prefix) as \`&#35;\` — e.g. a column header \`#\` becomes \`&#35;\`. Avoid square brackets / round brackets / curly braces inside labels; if you must include them, write them as \`&#91;\` / \`&#93;\` / \`&#40;\` / \`&#41;\` / \`&#123;\` / \`&#125;\`.
+  - When a field is absent, omit that line entirely — never emit empty \`<br/>\`, the word \`null\`, or \`undefined\`.
+  - Node ids and subgraph ids must be alphanumeric / underscore only. Sanitise component / binding / endpoint / state ids by replacing every non-\`[A-Za-z0-9_]\` character with \`_\`. Always keep the layer prefix (\`ui_\` / \`bind_\` / \`ep_\` / \`state_\`).
+  - Edge labels MUST be wrapped in double quotes — \`-- "rows" -->\` and \`-. "writes" .->\`.
 
-STYLING (optional but encouraged)
-  - At the bottom of the diagram, add \`classDef\` blocks and \`class\` assignments to colour each layer subtly — UI nodes one tint, bindings another, endpoints another, state slots another. Pick light backgrounds so labels stay readable.
+STYLING (optional)
+  - At the bottom you MAY add classDef + class assignments to tint each layer. Use one classDef per layer (e.g. \`classDef ui fill:#eef5ff,stroke:#0366d6\`) and one \`class a,b,c ui\` assignment listing every UI node id, etc. Keep colours light so text stays readable. Skip styling entirely if it would crowd the output.
 
 DO NOT
   - Do not invent components, bindings, endpoints, or state slots that aren't in the input JSON.
-  - Do not skip layout containers or "decorative" nodes — every component in the spec must appear.
-  - Do not collapse bindings or chains — each binding is its own node.
-  - Do not return anything except valid mermaid source inside the \`mermaid\` JSON field.
+  - Do not skip layout containers, leaves, or "decorative" nodes — every UI component in the spec must appear as a node.
+  - Do not collapse binding chains — each binding entry is its own node.
+  - Do not nest or mix shape brackets. Do not use parallelogram (\`[/.../]\`), trapezoid, hex (\`{{...}}\`), subroutine (\`[[...]]\`), rhombus (\`{...}\`), or any other shape — ONLY the four listed above.
+  - Do not return code fences, prose, or anything except the mermaid source string inside the \`mermaid\` JSON field.
 
 ENDPOINT CATALOG (for reference when labelling endpoints):
 ${catalogSummary()}`;
