@@ -36,6 +36,7 @@ const EXAMPLES: string[] = [
   "Bar chart of the top 10 contributors to facebook/react, with login on the x-axis and commit count on the y-axis.",
   "I wan to see a comparison of contributors for react, angular and vue as part of single bar chart",
   "I want to see a comparison of react, angular and vue in stars ammount on a bar chart.",
+  "I want to see a comparison of react, angular and vue based on total contributors count on a bar chart.",
 ];
 
 interface ConversationPanelProps {
