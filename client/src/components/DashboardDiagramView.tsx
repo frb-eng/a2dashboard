@@ -23,12 +23,61 @@ import cytoscape, {
 import dagre, { type DagreLayoutOptions } from "cytoscape-dagre";
 
 import type { Dashboard } from "../spec";
-import { buildGraph } from "../diagram/buildGraph";
+import { buildGraph, type DiagramLayer } from "../diagram/buildGraph";
 
 cytoscape.use(dagre);
 
 const dagreLayout = (opts: DagreLayoutOptions): cytoscape.LayoutOptions =>
   opts as unknown as cytoscape.LayoutOptions;
+
+type ShapeKind = "round-rectangle" | "ellipse" | "rectangle" | "diamond";
+
+interface LayerStyle {
+  shape: ShapeKind;
+  fill: string;
+  border: string;
+  text: string;
+  label: string;
+  hint: string;
+}
+
+const LAYER_STYLES: Record<DiagramLayer, LayerStyle> = {
+  ui: {
+    shape: "round-rectangle",
+    fill: "#eef5ff",
+    border: "#0366d6",
+    text: "#022c54",
+    label: "UI",
+    hint: "renderable component",
+  },
+  data: {
+    shape: "ellipse",
+    fill: "#f4ffeb",
+    border: "#52a300",
+    text: "#274a00",
+    label: "Data",
+    hint: "binding (rows / filter / sort / limit / union / group)",
+  },
+  endpoint: {
+    shape: "rectangle",
+    fill: "#fff5eb",
+    border: "#d67a00",
+    text: "#4a2a00",
+    label: "Endpoint",
+    hint: "REST call from the catalog",
+  },
+  state: {
+    shape: "diamond",
+    fill: "#faf0ff",
+    border: "#8a2be2",
+    text: "#2a004a",
+    label: "State",
+    hint: "shared state slot (stateKey)",
+  },
+};
+
+const EDGE_SOLID = { line: "#8a94a6", text: "#445063" };
+const EDGE_DOTTED = { line: "#b25fe2", text: "#5a1880" };
 
 const STYLE: StylesheetJson = [
   {
@@ -47,57 +96,32 @@ const STYLE: StylesheetJson = [
       height: "label",
       padding: "10px",
       "border-width": 1.5,
-      shape: "round-rectangle",
     },
   },
-  {
-    selector: 'node[layer = "ui"]',
-    style: {
-      "background-color": "#eef5ff",
-      "border-color": "#0366d6",
-      color: "#022c54",
-    },
-  },
-  {
-    selector: 'node[layer = "data"]',
-    style: {
-      "background-color": "#f4ffeb",
-      "border-color": "#52a300",
-      color: "#274a00",
-      shape: "ellipse",
-    },
-  },
-  {
-    selector: 'node[layer = "endpoint"]',
-    style: {
-      "background-color": "#fff5eb",
-      "border-color": "#d67a00",
-      color: "#4a2a00",
-      shape: "rectangle",
-    },
-  },
-  {
-    selector: 'node[layer = "state"]',
-    style: {
-      "background-color": "#faf0ff",
-      "border-color": "#8a2be2",
-      color: "#2a004a",
-      shape: "diamond",
-    },
-  },
+  ...(Object.entries(LAYER_STYLES) as [DiagramLayer, LayerStyle][]).map(
+    ([layer, s]) => ({
+      selector: `node[layer = "${layer}"]`,
+      style: {
+        shape: s.shape,
+        "background-color": s.fill,
+        "border-color": s.border,
+        color: s.text,
+      },
+    }),
+  ),
   {
     selector: "edge",
     style: {
       width: 1.5,
-      "line-color": "#8a94a6",
-      "target-arrow-color": "#8a94a6",
+      "line-color": EDGE_SOLID.line,
+      "target-arrow-color": EDGE_SOLID.line,
       "target-arrow-shape": "triangle",
       "curve-style": "bezier",
       label: "data(label)",
       "font-size": 10,
       "font-family":
         "ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace",
-      color: "#445063",
+      color: EDGE_SOLID.text,
       "text-background-color": "#ffffff",
       "text-background-opacity": 0.85,
       "text-background-padding": "2px",
@@ -108,9 +132,9 @@ const STYLE: StylesheetJson = [
     selector: 'edge[style = "dotted"]',
     style: {
       "line-style": "dashed",
-      "line-color": "#b25fe2",
-      "target-arrow-color": "#b25fe2",
-      color: "#5a1880",
+      "line-color": EDGE_DOTTED.line,
+      "target-arrow-color": EDGE_DOTTED.line,
+      color: EDGE_DOTTED.text,
     },
   },
 ];
@@ -130,6 +154,107 @@ function toElements(dashboard: Dashboard): ElementDefinition[] {
     },
   }));
   return [...nodes, ...edges];
+}
+
+function NodeSwatch({ style }: { style: LayerStyle }) {
+  const stroke = { fill: style.fill, stroke: style.border, strokeWidth: 1.5 };
+  return (
+    <svg width={28} height={18} viewBox="0 0 28 18" aria-hidden>
+      {style.shape === "round-rectangle" && (
+        <rect x={2} y={2} width={24} height={14} rx={4} ry={4} {...stroke} />
+      )}
+      {style.shape === "rectangle" && (
+        <rect x={2} y={2} width={24} height={14} {...stroke} />
+      )}
+      {style.shape === "ellipse" && (
+        <ellipse cx={14} cy={9} rx={12} ry={7} {...stroke} />
+      )}
+      {style.shape === "diamond" && (
+        <polygon points="14,1 27,9 14,17 1,9" {...stroke} />
+      )}
+    </svg>
+  );
+}
+
+function EdgeSwatch({
+  color,
+  dashed,
+}: {
+  color: string;
+  dashed: boolean;
+}) {
+  return (
+    <svg width={36} height={12} viewBox="0 0 36 12" aria-hidden>
+      <line
+        x1={2}
+        y1={6}
+        x2={28}
+        y2={6}
+        stroke={color}
+        strokeWidth={1.5}
+        strokeDasharray={dashed ? "4 3" : undefined}
+      />
+      <polygon points="28,2 34,6 28,10" fill={color} />
+    </svg>
+  );
+}
+
+function Legend() {
+  const itemSx = {
+    display: "flex",
+    alignItems: "center",
+    gap: 0.75,
+  } as const;
+  return (
+    <Stack
+      direction="row"
+      alignItems="center"
+      useFlexGap
+      flexWrap="wrap"
+      sx={{
+        px: 2,
+        py: 1,
+        borderBottom: 1,
+        borderColor: "divider",
+        rowGap: 0.75,
+        columnGap: 2,
+        bgcolor: "background.paper",
+      }}
+    >
+      {(Object.values(LAYER_STYLES) as LayerStyle[]).map((s) => (
+        <Box key={s.label} sx={itemSx} title={s.hint}>
+          <NodeSwatch style={s} />
+          <Typography variant="caption" sx={{ fontWeight: 600 }}>
+            {s.label}
+          </Typography>
+          <Typography variant="caption" color="text.secondary">
+            {s.hint}
+          </Typography>
+        </Box>
+      ))}
+      <Box sx={itemSx} title="containment, rows, source, endpoint, union tag">
+        <EdgeSwatch color={EDGE_SOLID.line} dashed={false} />
+        <Typography variant="caption" sx={{ fontWeight: 600 }}>
+          Data flow
+        </Typography>
+        <Typography variant="caption" color="text.secondary">
+          containment · rows · source · endpoint
+        </Typography>
+      </Box>
+      <Box
+        sx={itemSx}
+        title="textField writes, setStateAndRefresh, filter / endpoint state refs"
+      >
+        <EdgeSwatch color={EDGE_DOTTED.line} dashed />
+        <Typography variant="caption" sx={{ fontWeight: 600 }}>
+          State ref
+        </Typography>
+        <Typography variant="caption" color="text.secondary">
+          writes · setState · param ref
+        </Typography>
+      </Box>
+    </Stack>
+  );
 }
 
 interface Props {
@@ -181,6 +306,7 @@ export function DashboardDiagramView({ dashboard }: Props) {
           Fit
         </Button>
       </Stack>
+      <Legend />
       <Box
         ref={containerRef}
         sx={{
