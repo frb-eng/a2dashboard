@@ -35,6 +35,7 @@ const EXAMPLES: string[] = [
   "On left side I want to see the top 10 anthropic repos (based on amount of stars). Clicking on a repo I see on the right side the top 3 contributors name.",
   "Bar chart of the top 10 contributors to facebook/react, with login on the x-axis and commit count on the y-axis.",
   "I wan to see a comparison of contributors for react, angular and vue as part of single bar chart",
+  "I want to see a comparison of react, angular and vue in stars ammount on a bar chart.",
 ];
 
 interface ConversationPanelProps {
