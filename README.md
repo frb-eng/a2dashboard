@@ -509,6 +509,53 @@ one `union`:
 }
 ```
 
+#### Comparison by derived per-entity count via `group`
+
+When the user wants a derived per-entity value rather than the rows
+themselves — "total contributors per repo" rather than "the
+contributors of each repo" — stack a `group` binding on top of the
+`union`. `groupBy` matches the union's `tagField`, `op` is `"count"`,
+and the output rows are one bucket per entity. The chart then reads
+those buckets directly: one bar per entity, no `seriesField` needed:
+
+```jsonc
+{
+  "ui": {
+    "type": "barChart", "id": "framework_count_chart",
+    "title": "Total contributors: react vs angular vs vue",
+    "rows": "framework_contrib_counts",
+    "categoryField": "repo",
+    "valueField":    "contributor_count"
+  },
+  "data": {
+    "react_rows":   { "type": "rows", "endpoint": "react_call" },
+    "angular_rows": { "type": "rows", "endpoint": "angular_call" },
+    "vue_rows":     { "type": "rows", "endpoint": "vue_call" },
+    "framework_contribs_union": {
+      "type": "union",
+      "tagField": "repo",
+      "sources": [
+        { "source": "react_rows",   "tag": "react"   },
+        { "source": "angular_rows", "tag": "angular" },
+        { "source": "vue_rows",     "tag": "vue"     }
+      ]
+    },
+    "framework_contrib_counts": {
+      "type": "group",
+      "source":  "framework_contribs_union",
+      "groupBy": "repo",
+      "op":      "count",
+      "as":      "contributor_count"
+    }
+  },
+  "endpoints": {
+    "react_call":   { "endpointId": "github.repoContributors", "params": { "owner": "facebook", "repo": "react"   }, "refresh": { "kind": "on-mount" } },
+    "angular_call": { "endpointId": "github.repoContributors", "params": { "owner": "angular",  "repo": "angular" }, "refresh": { "kind": "on-mount" } },
+    "vue_call":     { "endpointId": "github.repoContributors", "params": { "owner": "vuejs",    "repo": "vue"     }, "refresh": { "kind": "on-mount" } }
+  }
+}
+```
+
 ## Bindings
 
 The `data` map holds the bindings that produce rows for tables. Each
@@ -523,6 +570,7 @@ renderer's evaluator stays finite and reviewable. New operators (group
 | `sort` | Rows from another binding, reordered by a single `field`. Comparison is numeric when both values are finite numbers, else string-coerced (case-sensitive); `null` / `undefined` sort to the end regardless of direction. Use for orderings the endpoint can't express server-side — e.g. `github.userRepos` has no "by stars" sort, so a client-side `sort` on `stargazers_count` desc + a `limit` is the "top N by stars" pattern. | `source` (id of another binding), `field` (dotted path), `direction` (`asc` / `desc`) |
 | `limit` | The first `count` rows of another binding — the "top N" primitive. The source's row order is preserved verbatim, so pair `limit` with an endpoint whose response is already usefully ordered (e.g. `github.repoContributors` returns contributors by commit count desc) or stack `limit` on top of `sort` for "top N by X". Chains freely: `limit` over `sort` over `filter` over `rows` is the canonical filtered-and-sorted-top-N pipeline. | `source` (id of another binding), `count` (non-negative integer) |
 | `union` | Concatenates rows from several other bindings, stamping each row with a literal `tag` under `tagField` so downstream consumers can tell which source it came from. The multi-source primitive behind "compare X across N entities in one chart": build one upstream binding per entity (optionally a `limit`-on-top-of-`rows` for "top N per entity"), union them with a per-entity tag, then point a `barChart` at the union with `seriesField` equal to `tagField`. Sources evaluate in parallel; cycles and dangling references are caught the same way as for the single-source bindings. | `sources[]` of `{ source (id of another binding), tag (literal string) }`, `tagField` (flat field name) |
+| `group` | Buckets another binding's rows by a flat field name and emits one output row per distinct key carrying the key plus an aggregated value. Stacked on top of a `union`, this is the "compare N entities by a derived per-entity value" primitive — e.g. union three repos' contributors, `group` by the union's `tagField` with `op: "count"`, and you have one row per repo carrying its total contributor count. Output rows preserve first-seen key order so the buckets appear in the union's source order without an extra `sort`. The MVP op is `count`; sum / avg / min / max land later as new `op` values. | `source` (id of another binding), `groupBy` (flat field name read from each input row), `op` (`count`), `as` (flat field name where the aggregated value is stored on each output row) |
 
 `filter op` ∈ `containsIgnoreCase`. Case-insensitive substring match
 against `String(row[field])`. An empty `value` (e.g. an unfilled
@@ -667,16 +715,6 @@ Row fields commonly used in column bindings: `login`, `avatar_url`,
 (the commit count). Anonymous contributors (only present when
 `anon` is truthy) carry `name` / `email` instead of `login` and have
 `type: "Anonymous"`.
-
-## MVP scope
-
-The current implementation is deliberately narrow — just enough surface area to validate the three-layer model end-to-end. Everything else (charts, KPIs, aggregations, more endpoints, alternative renderers) lands as a named extension to this MVP, not by quietly widening it.
-
-- **UI:** the eleven primitives listed under [Supported components](#supported-components). Rendered with React + MUI, plus Highcharts for `barChart`.
-- **Aggregation:** the five bindings listed under [Bindings](#bindings) — `rows` for raw endpoint responses, `filter` (op `containsIgnoreCase`) for client-side text filtering, `sort` for client-side ordering by a row field, `limit` for "top N" truncation, and `union` for concatenating several upstream bindings with per-source tags (the multi-series-chart primitive). No `group` / `agg` / `join` / `time-bucket` yet.
-- **Endpoint catalog:** the three GitHub endpoints listed under [Supported data sources](#supported-data-sources). Pagination is the only data-side behavior; refresh policy is `on-mount` or `manual`. Endpoint param values may also be `{ stateKey }` references that resolve against shared state slots at fetch time — slots are written by `textField` keystrokes or by `setStateAndRefresh` actions fired from buttons or row clicks — making a button-driven "type → search" or click-driven "select → detail" dashboard expressible without any code escape hatch. The renderer holds a fetch when a *required* catalog param (e.g. `repo` on `github.repoContributors`) is bound to a `{ stateKey }` whose slot is empty — the master-detail right panel sits idle until the row click writes the slot, instead of throwing "missing path param".
-
-In practice, a small MVP dashboard JSON is a single `table` bound to one of the catalogued endpoints; a richer one composes several tables under a `row`, `column`, `tabs`, or `card`; an interactive one adds a `textField` + `button` row whose state feeds either an endpoint param (refetch on apply) or a `filter` binding (re-narrow on apply); a master-detail one gives a `table` an `onRowClick: setStateAndRefresh` action and points a second table's endpoint param at the same slot.
 
 ## Milestones
 

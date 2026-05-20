@@ -270,6 +270,25 @@ export interface SortBinding {
   direction: SortDirection;
 }
 
+/** Aggregation operator for the `group` binding. */
+export type GroupOp = "count";
+
+/**
+ * Buckets another binding's rows by a flat field name and emits one
+ * output row per distinct key, carrying the key plus the aggregated
+ * value (`as`). Output rows preserve first-seen key order so a chart
+ * downstream of a `union` reads the buckets in the union's order.
+ */
+export interface GroupBinding {
+  type: "group";
+  source: string;
+  /** Flat field name read from each input row to bucket by. */
+  groupBy: string;
+  op: GroupOp;
+  /** Flat field name where the aggregated value is written on each output row. */
+  as: string;
+}
+
 /**
  * Concatenates rows from several other bindings into a single stream,
  * stamping each row with a literal tag so downstream consumers can tell
@@ -290,7 +309,8 @@ export type Binding =
   | FilterBinding
   | LimitBinding
   | SortBinding
-  | UnionBinding;
+  | UnionBinding
+  | GroupBinding;
 
 export type RefreshPolicy =
   | { kind: "manual" }

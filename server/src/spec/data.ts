@@ -101,6 +101,42 @@ export interface SortBinding {
 }
 
 /**
+ * Aggregation operator for the `group` binding. New ops (`sum`, `avg`,
+ * `min`, `max`) land as new enum values + matching evaluator branches —
+ * the same discipline as `FilterOp`. `count` doesn't read a per-row
+ * field; future numeric ops will require an additional `field` member
+ * on the binding, added in the same change as the op.
+ */
+export type GroupOp = "count";
+
+/**
+ * Buckets another binding's rows by a flat field name and emits one
+ * output row per distinct key, carrying the key plus the aggregated
+ * value. The MVP op is `count` (number of input rows in each bucket) —
+ * paired with a `union` upstream, this is "compare N entities by how
+ * many rows each one contributes" (e.g. total contributors per repo).
+ *
+ * Output rows preserve first-seen key order, so a `union` whose
+ * `sources` are listed `[react, angular, vue]` produces `[{ repo:
+ * "react", … }, { repo: "angular", … }, { repo: "vue", … }]` —
+ * downstream charts read them in that order without an extra `sort`.
+ *
+ * `groupBy` is a flat field name (same discipline as `union.tagField`);
+ * for nested keys, flatten upstream. The output row stores the key
+ * under that same field name, plus the aggregated value under `as`.
+ */
+export interface GroupBinding {
+  type: "group";
+  /** Id of another binding in `Dashboard.data` whose rows we aggregate. */
+  source: string;
+  /** Flat field name read from each input row to bucket by. */
+  groupBy: string;
+  op: GroupOp;
+  /** Flat field name where the aggregated value is written on each output row. */
+  as: string;
+}
+
+/**
  * Concatenates rows from several other bindings into a single stream,
  * stamping each row with a literal tag so downstream consumers can tell
  * which source it came from. This is the multi-source primitive that
@@ -138,4 +174,5 @@ export type Binding =
   | FilterBinding
   | LimitBinding
   | SortBinding
-  | UnionBinding;
+  | UnionBinding
+  | GroupBinding;

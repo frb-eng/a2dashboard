@@ -314,12 +314,32 @@ interface IntermediateUnionBinding {
   tagField: string;
 }
 
+const GROUP_OP_VALUES = ["count"] as const;
+type IntermediateGroupOp = (typeof GROUP_OP_VALUES)[number];
+
+/**
+ * Group binding in the LLM-emitted form. Buckets `source` rows by the
+ * flat field `groupBy` and emits one output row per distinct key,
+ * carrying the key (under `groupBy`) plus the aggregated value (under
+ * `as`). Output rows preserve first-seen key order, so the natural
+ * "compare N entities by count" pipeline is union → group, with the
+ * union's `tagField` doubling as the group's `groupBy`.
+ */
+interface IntermediateGroupBinding {
+  type: "group";
+  source: string;
+  groupBy: string;
+  op: IntermediateGroupOp;
+  as: string;
+}
+
 type IntermediateBinding =
   | IntermediateRowsBinding
   | IntermediateFilterBinding
   | IntermediateLimitBinding
   | IntermediateSortBinding
-  | IntermediateUnionBinding;
+  | IntermediateUnionBinding
+  | IntermediateGroupBinding;
 
 /**
  * Endpoint param value carried in the LLM-emitted intermediate form.
@@ -654,6 +674,21 @@ function unionBindingSchema(): Record<string, unknown> {
   };
 }
 
+function groupBindingSchema(): Record<string, unknown> {
+  return {
+    type: "object",
+    additionalProperties: false,
+    required: ["type", "source", "groupBy", "op", "as"],
+    properties: {
+      type: { type: "string", enum: ["group"] },
+      source: { type: "string" },
+      groupBy: { type: "string" },
+      op: { type: "string", enum: [...GROUP_OP_VALUES] },
+      as: { type: "string" },
+    },
+  };
+}
+
 function bindingSchema(): Record<string, unknown> {
   return {
     anyOf: [
@@ -662,6 +697,7 @@ function bindingSchema(): Record<string, unknown> {
       limitBindingSchema(),
       sortBindingSchema(),
       unionBindingSchema(),
+      groupBindingSchema(),
     ],
   };
 }
@@ -848,19 +884,20 @@ THREE-LAYER MODEL (when producing a dashboard)
      button variant   ∈ ${BUTTON_VARIANT_VALUES.map((v) => `"${v}"`).join(" | ")}.
      icon name ∈ ${ICON_NAME_VALUES.map((v) => `"${v}"`).join(" | ")}.
 
-  2. dataEntries — bindings that name how rows are produced. Five variants:
+  2. dataEntries — bindings that name how rows are produced. Six variants:
        - \`rows\`   — fetch from an endpoint and pass the response array through unchanged. Fields: \`endpoint\` (endpoint entry id), \`rowsPath\` (dotted path into the response body when the array isn't at the top level; null for the catalogued GitHub endpoints).
        - \`filter\` — keep only rows from another binding whose \`field\` matches \`value\`. Fields: \`source\` (id of another binding in dataEntries — typically a \`rows\` binding, but filters can chain), \`field\` (dotted path into each row, e.g. "title" or "user.login"), \`op\` ("containsIgnoreCase" — the only filter operator for now; numeric comparisons live in \`sort\` instead), and exactly one of \`value\` (literal scalar) / \`stateKey\` (textField slot, resolved at fetch time). Use \`filter\` for client-side search-style filtering when the GitHub endpoint can't express the predicate as a query param (e.g. text search over issue titles — \`labels\` is server-side, free-text isn't).
        - \`sort\`   — reorder another binding's rows by a single field. Fields: \`source\` (id of another binding), \`field\` (dotted path), \`direction\` ("asc" | "desc"). Comparison is numeric when both values are finite numbers, else string-coerced. Use \`sort\` when the user asks for an ordering the GitHub endpoint can't express server-side (e.g. \`github.userRepos\` has no "by stars" sort — use a client-side \`sort\` on \`stargazers_count\` desc instead). When the endpoint already supports the requested ordering, prefer the endpoint's own \`sort\` / \`direction\` params over a client-side \`sort\` binding.
        - \`limit\`  — truncate another binding's rows to at most \`count\` entries — the "top N" primitive. Fields: \`source\` (id of another binding), \`count\` (non-negative integer literal). The source's row order is preserved, so pair this with an endpoint whose response is already ordered usefully (e.g. \`github.repoContributors\` returns contributors by commit count desc, so a \`limit\` over it gives "top N contributors") or stack \`limit\` on top of \`sort\` for "top N by X". Filters, sorts, and limits chain through \`source\` — a \`limit\` whose \`source\` is a \`sort\` whose \`source\` is a \`rows\` binding is the canonical "top N by X" pipeline.
        - \`union\`  — concatenate rows from several other bindings, stamping each row with a literal tag so downstream consumers can tell which source it came from. Fields: \`sources\` (array of { source, tag } — each \`source\` is the id of another binding in dataEntries; \`tag\` is the literal string written onto every row that source produces), \`tagField\` (flat field name where the tag is stored on each row). Use \`union\` to compare the same metric across several entities in one chart: build one \`rows\` (optionally + \`limit\`) binding per entity, union them with a per-entity tag, then point a \`barChart\` at the union with \`seriesField\` equal to \`tagField\`. Each source may itself be any binding variant — so "top 10 contributors per repo, unioned across three repos" is three \`limit\`-on-top-of-\`rows\` chains feeding one \`union\`. Cycles and dangling references are caught by the engine; don't reference a binding from inside its own \`sources\`.
+       - \`group\`  — bucket another binding's rows by a flat field name and emit one output row per distinct key carrying the key plus an aggregated value. Fields: \`source\` (id of another binding), \`groupBy\` (flat field name read from each input row to bucket by — not a dotted path), \`op\` ("count" is the only aggregation op for now; sum / avg / min / max land later as new op values), \`as\` (flat field name where the aggregated value is written on each output row). Output rows preserve first-seen key order, so a \`union\` whose \`sources\` are listed [react, angular, vue] feeding a \`group\` produces buckets in that same order. Use \`group\` when the user asks for a derived per-bucket value (count, total, average) rather than the raw rows themselves — the canonical "compare N entities by row count" pipeline is N \`rows\` bindings → \`union\` (tagged by entity) → \`group\` (\`groupBy\` equal to the union's \`tagField\`, \`op\` "count"), with a \`barChart\` reading \`categoryField\`: \`groupBy\` and \`valueField\`: \`as\`.
   3. endpointEntries — concrete invocations of catalogued endpoints (id + params + refresh). Each param is { name, value, stateKey } where EXACTLY ONE of \`value\` (literal scalar) and \`stateKey\` (name of a textField slot, read at fetch time) is non-null.
 
 Cross-layer references use string ids and names:
   - uiRootId must equal some componentEntries[*].id
   - childIds[*], childId, tabs[*].childId, and columns[*].cellId must each equal some componentEntries[*].id (when not null)
   - table.rows and barChart.rows must each equal some dataEntries[*].id
-  - filter, sort, and limit binding \`source\` must each equal some other dataEntries[*].id (and must not form a cycle)
+  - filter, sort, limit, and group binding \`source\` must each equal some other dataEntries[*].id (and must not form a cycle)
   - union binding \`sources[*].source\` must each equal some other dataEntries[*].id (and must not form a cycle)
   - rows binding \`endpoint\` must equal some endpointEntries[*].id
   - endpointEntries[*].call.endpointId must equal a catalogued endpoint id
@@ -874,6 +911,7 @@ GUIDANCE
   - Prefer a single \`table\` at the root when one is enough. Reach for containers (\`row\`, \`column\`, \`list\`, \`card\`, \`tabs\`) only when the user actually asks for multiple panels, grouped sections, or switchable views.
   - When the user asks for a chart, graph, or "visualize as bars / columns", use \`barChart\`. \`categoryField\` is the dotted path on each row for the x-axis label (e.g. "login", "name") and \`valueField\` is the dotted path for the y-axis numeric value (e.g. "contributions", "stargazers_count"). \`seriesField\` is null for a single-series chart. For a "top N" bar chart, point \`rows\` at the same \`limit\`-on-top-of-\`sort\`-on-top-of-\`rows\` pipeline you would use for a top-N table — bar charts read the binding the same way tables do.
   - When the user asks to compare the same metric across several named entities in one chart ("contributors for react, angular and vue", "stars across these three repos", "issues opened in repo A vs repo B"), build one \`rows\` binding per entity (plus a per-entity \`limit\` if they ask for "top N"), then join them with a \`union\` binding that stamps a tag per source. Point the \`barChart\`'s \`rows\` at the union, set \`seriesField\` to the union's \`tagField\`, and use the natural per-row fields for \`categoryField\` / \`valueField\` (e.g. "login" / "contributions"). Pick short tag strings the user would recognise as labels (e.g. "react" / "angular" / "vue") since they show up verbatim in the legend.
+  - When the user asks for a DERIVED per-entity value rather than the rows themselves ("total contributors count per repo", "number of open issues per repo"), add a \`group\` binding on top of the \`union\` with \`groupBy\` equal to the union's \`tagField\` and \`op\` "count". Point the \`barChart\` at the \`group\` binding with \`categoryField\` equal to \`groupBy\` and \`valueField\` equal to \`as\`; \`seriesField\` is null because each entity is already its own bar (one row per bucket). For non-count aggregations (sum / avg) the primitive does not exist yet — name the missing op and refuse rather than approximating with \`count\`.
   - When you do use a container, give every component a distinct id and reference children by id.
   - \`card\` accepts a single \`childId\`. To put several things in a card, wrap them in a \`column\`/\`row\`/\`list\` and point \`childId\` at that container.
   - \`tabs\` must have at least one entry. Each tab is a { title, childId } pair; the child is whatever component should appear when the tab is active.
@@ -1084,6 +1122,14 @@ function toBinding(
         type: "union",
         sources: b.sources.map((s) => ({ source: s.source, tag: s.tag })),
         tagField: b.tagField,
+      };
+    case "group":
+      return {
+        type: "group",
+        source: b.source,
+        groupBy: b.groupBy,
+        op: b.op,
+        as: b.as,
       };
   }
 }

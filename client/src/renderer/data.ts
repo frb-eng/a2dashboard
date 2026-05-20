@@ -8,12 +8,14 @@
  *   2. Fetch that URL and pull rows out of the response, honoring the
  *      binding's optional `rowsPath`.
  *   3. Evaluate the data-aggregation binding tree: a `rows` binding goes
- *      straight to (1)+(2); `filter` / `sort` / `limit` recursively
- *      evaluate their single `source`; `union` evaluates each of its
- *      multiple sources in parallel, stamps a per-source tag onto every
- *      row, and concatenates them into one stream. Cycles and dangling
- *      references are caught here; new operators (group / agg / join)
- *      land as new switch arms.
+ *      straight to (1)+(2); `filter` / `sort` / `limit` / `group`
+ *      recursively evaluate their single `source` (group buckets the
+ *      upstream rows by a flat field and emits one output row per
+ *      bucket with the aggregated value); `union` evaluates each of
+ *      its multiple sources in parallel, stamps a per-source tag onto
+ *      every row, and concatenates them into one stream. Cycles and
+ *      dangling references are caught here; new operators (sum / avg /
+ *      join) land as new switch arms.
  *
  * The catalog is fetched from the server once per session (the server is
  * the source of truth for URL templates and param locations) and cached.
@@ -26,6 +28,7 @@ import type {
   EndpointCall,
   EndpointParamValue,
   FilterBinding,
+  GroupBinding,
   LimitBinding,
   RowsBinding,
   SortBinding,
@@ -115,8 +118,8 @@ export function buildUrl(
  * Walk a binding tree down to every underlying `rows` binding it
  * eventually reads from. Used by the renderer to look up the endpoint
  * call(s) that ultimately back a (possibly filtered / sorted / limited /
- * unioned) binding — e.g. to decide whether the fetch should be held on
- * a required state slot being populated.
+ * unioned / grouped) binding — e.g. to decide whether the fetch should
+ * be held on a required state slot being populated.
  *
  * Returns every `rows` binding reachable through `.source` chains and
  * `union.sources[]`. Dangling references and cycles are skipped here;
@@ -247,6 +250,30 @@ function applyLimit(
   }
   const n = Math.floor(binding.count);
   return rows.slice(0, n);
+}
+
+function applyGroup(
+  rows: Record<string, unknown>[],
+  binding: GroupBinding,
+): Record<string, unknown>[] {
+  // Map preserves insertion order in JS, so the first time each key is
+  // seen sets its position in the output — downstream charts read the
+  // buckets in the same order the input rows arrived (e.g. a `union`'s
+  // source order).
+  switch (binding.op) {
+    case "count": {
+      const counts = new Map<unknown, number>();
+      for (const row of rows) {
+        const key = row[binding.groupBy];
+        counts.set(key, (counts.get(key) ?? 0) + 1);
+      }
+      const out: Record<string, unknown>[] = [];
+      for (const [key, count] of counts) {
+        out.push({ [binding.groupBy]: key, [binding.as]: count });
+      }
+      return out;
+    }
+  }
 }
 
 async function applyUnion(
@@ -411,5 +438,31 @@ export async function fetchRows(
     }
     case "union":
       return applyUnion(binding, dashboard, catalog, resolveState, visiting);
+    case "group": {
+      const source = dashboard.data[binding.source];
+      if (!source) {
+        throw new Error(
+          `Group binding references unknown source id "${binding.source}".`,
+        );
+      }
+      if (visiting.has(binding.source)) {
+        throw new Error(
+          `Binding cycle detected at group source "${binding.source}".`,
+        );
+      }
+      visiting.add(binding.source);
+      try {
+        const upstream = await fetchRows(
+          source,
+          dashboard,
+          catalog,
+          resolveState,
+          visiting,
+        );
+        return applyGroup(upstream, binding);
+      } finally {
+        visiting.delete(binding.source);
+      }
+    }
   }
 }
