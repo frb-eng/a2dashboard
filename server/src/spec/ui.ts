@@ -86,11 +86,19 @@ export interface TableNode {
 }
 
 /**
- * Vertical bar chart bound to a row-producing binding. One bar per row;
- * `categoryField` resolves the x-axis label and `valueField` resolves the
- * y-axis numeric value, both as dotted paths into the row. Non-numeric or
- * missing values render as 0. No transformation lives here — for "top N
- * by X" pipe the binding through `sort` + `limit` upstream.
+ * Vertical bar chart bound to a row-producing binding. One bar per
+ * (category, series) pair; `categoryField` resolves the x-axis label
+ * and `valueField` resolves the y-axis numeric value, both as dotted
+ * paths into the row. Non-numeric or missing values render as 0. No
+ * transformation lives here — for "top N by X" pipe the binding through
+ * `sort` + `limit` upstream.
+ *
+ * When `seriesField` is set, rows are grouped by its value into multiple
+ * series rendered side-by-side per category, with a legend keyed off the
+ * series names — the natural shape for comparing the same metric across
+ * several entities (e.g. contributors of three repos joined via a
+ * `union` binding, seriesField pointing at the tag field). Omit it to
+ * render a single-series chart with one bar per row.
  */
 export interface BarChartNode {
   type: "barChart";
@@ -103,6 +111,12 @@ export interface BarChartNode {
   categoryField: string;
   /** Dotted path into each row used as the bar's y-axis numeric value. */
   valueField: string;
+  /**
+   * Optional dotted path used to group rows into named series. When
+   * present, bars are rendered side-by-side per category and a legend
+   * is shown. When absent, the chart is single-series.
+   */
+  seriesField?: string;
 }
 
 export interface RowNode {

@@ -23,7 +23,7 @@
 
 import { useCallback, useEffect, useState } from "react";
 import type { Binding, CatalogEntry, Dashboard, EndpointCall } from "../spec";
-import { fetchRows, findRootRowsBinding, loadCatalog } from "./data";
+import { fetchRows, findRootRowsBindings, loadCatalog } from "./data";
 import { useDashboardState } from "./DashboardStateContext";
 
 export interface RowsState {
@@ -91,17 +91,21 @@ export function useRows(
         const catalog = await loadCatalog();
         if (cancelled) return;
 
-        const rootRows = findRootRowsBinding(binding, dashboard);
-        const call = rootRows ? dashboard.endpoints[rootRows.endpoint] : undefined;
-        if (call) {
-          const pending = pendingRequiredStateKeys(call, catalog, getValue);
-          if (pending.length > 0) {
-            setIdle(true);
-            setPendingStateKeys(pending);
-            setRows(null);
-            setLoading(false);
-            return;
+        const rootRows = findRootRowsBindings(binding, dashboard);
+        const pending = new Set<string>();
+        for (const r of rootRows) {
+          const call = dashboard.endpoints[r.endpoint];
+          if (!call) continue;
+          for (const key of pendingRequiredStateKeys(call, catalog, getValue)) {
+            pending.add(key);
           }
+        }
+        if (pending.size > 0) {
+          setIdle(true);
+          setPendingStateKeys([...pending]);
+          setRows(null);
+          setLoading(false);
+          return;
         }
         setIdle(false);
         setPendingStateKeys([]);

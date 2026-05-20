@@ -84,6 +84,8 @@ interface IntermediateBarChartComponent {
   rows: string;
   categoryField: string;
   valueField: string;
+  /** Dotted path used to group rows into named series; null for single-series. */
+  seriesField: string | null;
 }
 
 interface IntermediateRowComponent {
@@ -299,11 +301,25 @@ interface IntermediateSortBinding {
   direction: IntermediateSortDirection;
 }
 
+/**
+ * Union binding in the LLM-emitted form. Concatenates rows from several
+ * other bindings, stamping each row with the source's `tag` under
+ * `tagField`. Downstream consumers (typically a `barChart` with
+ * `seriesField` pointing at `tagField`) read the tag back to tell rows
+ * apart by origin.
+ */
+interface IntermediateUnionBinding {
+  type: "union";
+  sources: { source: string; tag: string }[];
+  tagField: string;
+}
+
 type IntermediateBinding =
   | IntermediateRowsBinding
   | IntermediateFilterBinding
   | IntermediateLimitBinding
-  | IntermediateSortBinding;
+  | IntermediateSortBinding
+  | IntermediateUnionBinding;
 
 /**
  * Endpoint param value carried in the LLM-emitted intermediate form.
@@ -396,7 +412,7 @@ function barChartComponentSchema(): Record<string, unknown> {
   return {
     type: "object",
     additionalProperties: false,
-    required: ["type", "id", "title", "rows", "categoryField", "valueField"],
+    required: ["type", "id", "title", "rows", "categoryField", "valueField", "seriesField"],
     properties: {
       type: { type: "string", enum: ["barChart"] },
       id: { type: "string" },
@@ -404,6 +420,7 @@ function barChartComponentSchema(): Record<string, unknown> {
       rows: { type: "string" },
       categoryField: { type: "string" },
       valueField: { type: "string" },
+      seriesField: { type: ["string", "null"] },
     },
   };
 }
@@ -613,6 +630,30 @@ function sortBindingSchema(): Record<string, unknown> {
   };
 }
 
+function unionBindingSchema(): Record<string, unknown> {
+  return {
+    type: "object",
+    additionalProperties: false,
+    required: ["type", "sources", "tagField"],
+    properties: {
+      type: { type: "string", enum: ["union"] },
+      sources: {
+        type: "array",
+        items: {
+          type: "object",
+          additionalProperties: false,
+          required: ["source", "tag"],
+          properties: {
+            source: { type: "string" },
+            tag: { type: "string" },
+          },
+        },
+      },
+      tagField: { type: "string" },
+    },
+  };
+}
+
 function bindingSchema(): Record<string, unknown> {
   return {
     anyOf: [
@@ -620,6 +661,7 @@ function bindingSchema(): Record<string, unknown> {
       filterBindingSchema(),
       limitBindingSchema(),
       sortBindingSchema(),
+      unionBindingSchema(),
     ],
   };
 }
@@ -782,7 +824,7 @@ THREE-LAYER MODEL (when producing a dashboard)
                         Each column is { id, header, field, cellId }. Set EXACTLY ONE of \`field\` or \`cellId\` per column (the other must be null):
                             * \`field\` (dotted path into the row) — render the value directly as text.
                             * \`cellId\` (id of any component) — render that component inside every cell. Inside the cell, descendant \`text\` nodes resolve their \`field\` against the row.
-       - \`barChart\`  — data-producing leaf. Fields: \`rows\` (binding id), \`categoryField\` (dotted path into each row used as the x-axis label), \`valueField\` (dotted path into each row used as the y-axis numeric value), optional \`title\`. One bar per row. No transformation lives here — for "top N by X" pipe the binding through \`sort\` + \`limit\` upstream, the same way you would for a table.
+       - \`barChart\`  — data-producing leaf. Fields: \`rows\` (binding id), \`categoryField\` (dotted path into each row used as the x-axis label), \`valueField\` (dotted path into each row used as the y-axis numeric value), \`seriesField\` (dotted path used to group rows into named series rendered side-by-side per category — set when the chart needs to compare a metric across several entities; null for a single-series chart), optional \`title\`. No transformation lives here — for "top N by X" pipe the binding through \`sort\` + \`limit\` upstream, the same way you would for a table. To compare the same metric across several entities in one chart, point \`rows\` at a \`union\` binding (see below) and set \`seriesField\` to the same field name as the union's \`tagField\`.
        - \`row\`       — horizontal flex container. Fields: \`childIds\` (component ids), optional \`title\`, \`justify\`, \`align\`.
        - \`column\`    — vertical flex container. Fields: \`childIds\` (component ids), optional \`title\`, \`justify\`, \`align\`.
        - \`list\`      — uniform layout container. Fields: \`childIds\` (component ids), optional \`title\`, \`direction\` ("vertical" | "horizontal"), \`align\`.
@@ -806,11 +848,12 @@ THREE-LAYER MODEL (when producing a dashboard)
      button variant   ∈ ${BUTTON_VARIANT_VALUES.map((v) => `"${v}"`).join(" | ")}.
      icon name ∈ ${ICON_NAME_VALUES.map((v) => `"${v}"`).join(" | ")}.
 
-  2. dataEntries — bindings that name how rows are produced. Four variants:
+  2. dataEntries — bindings that name how rows are produced. Five variants:
        - \`rows\`   — fetch from an endpoint and pass the response array through unchanged. Fields: \`endpoint\` (endpoint entry id), \`rowsPath\` (dotted path into the response body when the array isn't at the top level; null for the catalogued GitHub endpoints).
        - \`filter\` — keep only rows from another binding whose \`field\` matches \`value\`. Fields: \`source\` (id of another binding in dataEntries — typically a \`rows\` binding, but filters can chain), \`field\` (dotted path into each row, e.g. "title" or "user.login"), \`op\` ("containsIgnoreCase" — the only filter operator for now; numeric comparisons live in \`sort\` instead), and exactly one of \`value\` (literal scalar) / \`stateKey\` (textField slot, resolved at fetch time). Use \`filter\` for client-side search-style filtering when the GitHub endpoint can't express the predicate as a query param (e.g. text search over issue titles — \`labels\` is server-side, free-text isn't).
        - \`sort\`   — reorder another binding's rows by a single field. Fields: \`source\` (id of another binding), \`field\` (dotted path), \`direction\` ("asc" | "desc"). Comparison is numeric when both values are finite numbers, else string-coerced. Use \`sort\` when the user asks for an ordering the GitHub endpoint can't express server-side (e.g. \`github.userRepos\` has no "by stars" sort — use a client-side \`sort\` on \`stargazers_count\` desc instead). When the endpoint already supports the requested ordering, prefer the endpoint's own \`sort\` / \`direction\` params over a client-side \`sort\` binding.
        - \`limit\`  — truncate another binding's rows to at most \`count\` entries — the "top N" primitive. Fields: \`source\` (id of another binding), \`count\` (non-negative integer literal). The source's row order is preserved, so pair this with an endpoint whose response is already ordered usefully (e.g. \`github.repoContributors\` returns contributors by commit count desc, so a \`limit\` over it gives "top N contributors") or stack \`limit\` on top of \`sort\` for "top N by X". Filters, sorts, and limits chain through \`source\` — a \`limit\` whose \`source\` is a \`sort\` whose \`source\` is a \`rows\` binding is the canonical "top N by X" pipeline.
+       - \`union\`  — concatenate rows from several other bindings, stamping each row with a literal tag so downstream consumers can tell which source it came from. Fields: \`sources\` (array of { source, tag } — each \`source\` is the id of another binding in dataEntries; \`tag\` is the literal string written onto every row that source produces), \`tagField\` (flat field name where the tag is stored on each row). Use \`union\` to compare the same metric across several entities in one chart: build one \`rows\` (optionally + \`limit\`) binding per entity, union them with a per-entity tag, then point a \`barChart\` at the union with \`seriesField\` equal to \`tagField\`. Each source may itself be any binding variant — so "top 10 contributors per repo, unioned across three repos" is three \`limit\`-on-top-of-\`rows\` chains feeding one \`union\`. Cycles and dangling references are caught by the engine; don't reference a binding from inside its own \`sources\`.
   3. endpointEntries — concrete invocations of catalogued endpoints (id + params + refresh). Each param is { name, value, stateKey } where EXACTLY ONE of \`value\` (literal scalar) and \`stateKey\` (name of a textField slot, read at fetch time) is non-null.
 
 Cross-layer references use string ids and names:
@@ -818,6 +861,7 @@ Cross-layer references use string ids and names:
   - childIds[*], childId, tabs[*].childId, and columns[*].cellId must each equal some componentEntries[*].id (when not null)
   - table.rows and barChart.rows must each equal some dataEntries[*].id
   - filter, sort, and limit binding \`source\` must each equal some other dataEntries[*].id (and must not form a cycle)
+  - union binding \`sources[*].source\` must each equal some other dataEntries[*].id (and must not form a cycle)
   - rows binding \`endpoint\` must equal some endpointEntries[*].id
   - endpointEntries[*].call.endpointId must equal a catalogued endpoint id
   - endpoint param \`stateKey\` and filter binding \`stateKey\` must each equal a slot written somewhere in the UI tree — either a \`textField\`'s \`stateKey\`, or an action's \`stateKey\` on a \`button.action\` / \`table.onRowClick\` with kind "setStateAndRefresh"
@@ -828,7 +872,8 @@ ${catalogForPrompt()}
 
 GUIDANCE
   - Prefer a single \`table\` at the root when one is enough. Reach for containers (\`row\`, \`column\`, \`list\`, \`card\`, \`tabs\`) only when the user actually asks for multiple panels, grouped sections, or switchable views.
-  - When the user asks for a chart, graph, or "visualize as bars / columns", use \`barChart\`. \`categoryField\` is the dotted path on each row for the x-axis label (e.g. "login", "name") and \`valueField\` is the dotted path for the y-axis numeric value (e.g. "contributions", "stargazers_count"). For a "top N" bar chart, point \`rows\` at the same \`limit\`-on-top-of-\`sort\`-on-top-of-\`rows\` pipeline you would use for a top-N table — bar charts read the binding the same way tables do.
+  - When the user asks for a chart, graph, or "visualize as bars / columns", use \`barChart\`. \`categoryField\` is the dotted path on each row for the x-axis label (e.g. "login", "name") and \`valueField\` is the dotted path for the y-axis numeric value (e.g. "contributions", "stargazers_count"). \`seriesField\` is null for a single-series chart. For a "top N" bar chart, point \`rows\` at the same \`limit\`-on-top-of-\`sort\`-on-top-of-\`rows\` pipeline you would use for a top-N table — bar charts read the binding the same way tables do.
+  - When the user asks to compare the same metric across several named entities in one chart ("contributors for react, angular and vue", "stars across these three repos", "issues opened in repo A vs repo B"), build one \`rows\` binding per entity (plus a per-entity \`limit\` if they ask for "top N"), then join them with a \`union\` binding that stamps a tag per source. Point the \`barChart\`'s \`rows\` at the union, set \`seriesField\` to the union's \`tagField\`, and use the natural per-row fields for \`categoryField\` / \`valueField\` (e.g. "login" / "contributions"). Pick short tag strings the user would recognise as labels (e.g. "react" / "angular" / "vue") since they show up verbatim in the legend.
   - When you do use a container, give every component a distinct id and reference children by id.
   - \`card\` accepts a single \`childId\`. To put several things in a card, wrap them in a \`column\`/\`row\`/\`list\` and point \`childId\` at that container.
   - \`tabs\` must have at least one entry. Each tab is a { title, childId } pair; the child is whatever component should appear when the tab is active.
@@ -920,6 +965,7 @@ function buildUITree(
           rows: c.rows,
           categoryField: c.categoryField,
           valueField: c.valueField,
+          ...(c.seriesField ? { seriesField: c.seriesField } : {}),
         };
       case "row":
         return {
@@ -1032,6 +1078,12 @@ function toBinding(
         source: b.source,
         field: b.field,
         direction: b.direction,
+      };
+    case "union":
+      return {
+        type: "union",
+        sources: b.sources.map((s) => ({ source: s.source, tag: s.tag })),
+        tagField: b.tagField,
       };
   }
 }
