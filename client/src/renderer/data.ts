@@ -6,7 +6,16 @@
  *      URL by substituting path params into the catalogued template and
  *      appending the rest as query string.
  *   2. Fetch that URL and pull rows out of the response, honoring the
- *      binding's optional `rowsPath`.
+ *      binding's optional `rowsPath`. When the catalog entry carries a
+ *      `pagination` block — naming the page-index and page-size query
+ *      params, the default page size, and a per-binding cap on pages
+ *      walked — and its response is an array, the engine auto-paginates:
+ *      it walks the page sequence until a short page is returned (i.e.
+ *      the underlying stream is exhausted) or `maxPages` is reached,
+ *      and concatenates the pages into one row stream. The catalog is
+ *      the only source of truth; the engine does no name-sniffing. The
+ *      cap is a hard guard against pathological queries chewing
+ *      through the unauthenticated rate-limit budget.
  *   3. Evaluate the data-aggregation binding tree: a `rows` binding goes
  *      straight to (1)+(2); `filter` / `sort` / `limit` / `group`
  *      recursively evaluate their single `source` (group buckets the
@@ -174,6 +183,23 @@ export function readPath(obj: unknown, path: string): unknown {
   return cur;
 }
 
+/** Build a fetch URL for one page, overriding page-index / page-size on the call. */
+function buildPageUrl(
+  entry: CatalogEntry,
+  call: EndpointCall,
+  pageParam: string,
+  pageSizeParam: string,
+  page: number,
+  perPage: number,
+  resolveState: StateResolver | null,
+): string {
+  const paged: EndpointCall = {
+    ...call,
+    params: { ...call.params, [pageParam]: page, [pageSizeParam]: perPage },
+  };
+  return buildUrl(entry, paged, resolveState);
+}
+
 async function fetchRowsBinding(
   binding: RowsBinding,
   dashboard: Dashboard,
@@ -187,6 +213,14 @@ async function fetchRowsBinding(
   const entry = catalog.find((e) => e.id === call.endpointId);
   if (!entry) {
     throw new Error(`Endpoint call references unknown catalog id "${call.endpointId}".`);
+  }
+
+  // The catalog says whether this endpoint paginates and, if so, which
+  // params carry page index / size, what page size to default to, and
+  // how many pages we're willing to walk. The engine just follows the
+  // contract.
+  if (entry.responseIsArray && entry.pagination) {
+    return fetchAllPages(binding, entry, call, entry.pagination, resolveState);
   }
 
   const url = buildUrl(entry, call, resolveState);
@@ -214,6 +248,71 @@ async function fetchRowsBinding(
       (binding.rowsPath ? ` at path "${binding.rowsPath}"` : "") +
       `, got ${typeof extracted}.`,
   );
+}
+
+/**
+ * Walk pages of a paginated array endpoint until exhaustion or the
+ * catalogued safety cap. Termination on `rows.length < perPage` (the
+ * canonical "short page = last page" signal); the loop also bails on
+ * an empty page for endpoints that pad past the end with `[]`.
+ *
+ * Page index starts at the spec's `pageParam` value when set (so "page
+ * N onward" still works), otherwise 1. Page size honors the spec's
+ * `pageSizeParam` when set, else falls back to the catalog's
+ * `defaultPageSize`.
+ */
+async function fetchAllPages(
+  binding: RowsBinding,
+  entry: CatalogEntry,
+  call: EndpointCall,
+  pagination: NonNullable<CatalogEntry["pagination"]>,
+  resolveState: StateResolver | null,
+): Promise<Record<string, unknown>[]> {
+  const startPage = numberFromParam(call.params[pagination.pageParam]) ?? 1;
+  const perPage =
+    numberFromParam(call.params[pagination.pageSizeParam]) ?? pagination.defaultPageSize;
+
+  const all: Record<string, unknown>[] = [];
+  for (let i = 0; i < pagination.maxPages; i++) {
+    const page = startPage + i;
+    const url = buildPageUrl(
+      entry,
+      call,
+      pagination.pageParam,
+      pagination.pageSizeParam,
+      page,
+      perPage,
+      resolveState,
+    );
+    const res = await fetch(url, { headers: { accept: "application/vnd.github+json" } });
+    if (!res.ok) {
+      const text = await res.text().catch(() => "");
+      throw new Error(`GET ${url} returned ${res.status}: ${text.slice(0, 200)}`);
+    }
+    const body = (await res.json()) as unknown;
+    const extracted = binding.rowsPath ? readPath(body, binding.rowsPath) : body;
+    if (!Array.isArray(extracted)) {
+      throw new Error(
+        `Expected an array of rows from "${call.endpointId}"` +
+          (binding.rowsPath ? ` at path "${binding.rowsPath}"` : "") +
+          `, got ${typeof extracted}.`,
+      );
+    }
+    const rows = extracted as Record<string, unknown>[];
+    all.push(...rows);
+    if (rows.length < perPage) break;
+  }
+  return all;
+}
+
+function numberFromParam(v: EndpointParamValue | undefined): number | null {
+  if (v == null) return null;
+  // State refs aren't resolved here — only literal numeric params steer
+  // the pagination loop. An LLM-emitted dashboard never wires page /
+  // per_page to a state slot.
+  if (typeof v === "object") return null;
+  const n = typeof v === "number" ? v : Number(v);
+  return Number.isFinite(n) && n > 0 ? n : null;
 }
 
 function compareDefined(a: unknown, b: unknown): number {
