@@ -11,6 +11,7 @@
 import type { Dashboard } from "../spec";
 import { NodeRenderer, register } from "./registry";
 import { TableRenderer } from "./components/Table";
+import { BarChartRenderer } from "./components/BarChart";
 import { RowRenderer } from "./components/Row";
 import { ColumnRenderer } from "./components/Column";
 import { ListRenderer } from "./components/List";
@@ -23,6 +24,7 @@ import { ButtonRenderer } from "./components/Button";
 import { DashboardStateProvider } from "./DashboardStateContext";
 
 register("table", TableRenderer);
+register("barChart", BarChartRenderer);
 register("row", RowRenderer);
 register("column", ColumnRenderer);
 register("list", ListRenderer);
