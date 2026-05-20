@@ -26,6 +26,21 @@ export interface GenerateResponse {
   model: string;
 }
 
+/**
+ * Thrown by `generate` when the server returned a non-2xx. Carries the
+ * raw intermediate dashboard JSON (in the LLM-emitted flat form) when
+ * the failure was a validation rejection — so the caller can show it
+ * for debugging instead of just an opaque error string.
+ */
+export class GenerateError extends Error {
+  readonly rawDashboard?: unknown;
+  constructor(message: string, rawDashboard?: unknown) {
+    super(message);
+    this.name = "GenerateError";
+    this.rawDashboard = rawDashboard;
+  }
+}
+
 export async function generate(req: GenerateRequest): Promise<GenerateResponse> {
   const res = await fetch("/api/generate", {
     method: "POST",
@@ -34,7 +49,17 @@ export async function generate(req: GenerateRequest): Promise<GenerateResponse> 
   });
   if (!res.ok) {
     const text = await res.text();
-    throw new Error(`Server returned ${res.status}: ${text}`);
+    let parsed: { error?: string; rawDashboard?: unknown } | null = null;
+    try {
+      parsed = JSON.parse(text) as { error?: string; rawDashboard?: unknown };
+    } catch {
+      // Response wasn't JSON — fall through to the plain-text message.
+    }
+    const detail = parsed?.error ?? text;
+    throw new GenerateError(
+      `Server returned ${res.status}: ${detail}`,
+      parsed?.rawDashboard,
+    );
   }
   return (await res.json()) as GenerateResponse;
 }

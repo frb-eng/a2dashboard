@@ -12,6 +12,8 @@ import Avatar from "@mui/material/Avatar";
 import Box from "@mui/material/Box";
 import Button from "@mui/material/Button";
 import CircularProgress from "@mui/material/CircularProgress";
+import Collapse from "@mui/material/Collapse";
+import Link from "@mui/material/Link";
 import Menu from "@mui/material/Menu";
 import MenuItem from "@mui/material/MenuItem";
 import Paper from "@mui/material/Paper";
@@ -219,9 +221,14 @@ function MessageBubble({ message }: { message: ChatMessage }) {
         }}
       >
         {message.error ? (
-          <Alert severity="error" variant="outlined" sx={{ py: 0 }}>
-            {message.error}
-          </Alert>
+          <Stack spacing={1}>
+            <Alert severity="error" variant="outlined" sx={{ py: 0 }}>
+              {message.error}
+            </Alert>
+            {message.rawDashboard !== undefined && (
+              <RawDashboardDebug raw={message.rawDashboard} />
+            )}
+          </Stack>
         ) : message.pending ? (
           <Stack direction="row" spacing={1} alignItems="center">
             <CircularProgress size={14} />
@@ -239,5 +246,77 @@ function MessageBubble({ message }: { message: ChatMessage }) {
         )}
       </Paper>
     </Stack>
+  );
+}
+
+/**
+ * Expandable JSON viewer shown under a failed assistant turn. The
+ * payload is the LLM's raw intermediate dashboard JSON (flat
+ * componentEntries form), preserved by the server so the user can see
+ * what the model produced even when validation rejected it.
+ */
+function RawDashboardDebug({ raw }: { raw: unknown }) {
+  const [open, setOpen] = useState(false);
+  const text = (() => {
+    try {
+      return JSON.stringify(raw, null, 2);
+    } catch {
+      return String(raw);
+    }
+  })();
+  const copy = async () => {
+    try {
+      await navigator.clipboard.writeText(text);
+    } catch {
+      // clipboard may be unavailable; intentionally swallowed
+    }
+  };
+  return (
+    <Box>
+      <Stack direction="row" spacing={1} alignItems="center">
+        <Link
+          component="button"
+          type="button"
+          variant="caption"
+          underline="hover"
+          onClick={() => setOpen((v) => !v)}
+        >
+          {open ? "Hide generated JSON" : "Show generated JSON"}
+        </Link>
+        {open && (
+          <Link
+            component="button"
+            type="button"
+            variant="caption"
+            underline="hover"
+            onClick={copy}
+          >
+            Copy
+          </Link>
+        )}
+      </Stack>
+      <Collapse in={open}>
+        <Box
+          component="pre"
+          sx={{
+            m: 0,
+            mt: 0.5,
+            p: 1,
+            bgcolor: "background.default",
+            border: 1,
+            borderColor: "divider",
+            borderRadius: 1,
+            fontFamily: "ui-monospace, SFMono-Regular, Menlo, monospace",
+            fontSize: 11,
+            lineHeight: 1.45,
+            overflowX: "auto",
+            maxHeight: 320,
+            whiteSpace: "pre",
+          }}
+        >
+          {text}
+        </Box>
+      </Collapse>
+    </Box>
   );
 }

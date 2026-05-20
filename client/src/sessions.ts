@@ -22,6 +22,14 @@ export interface ChatMessage {
   pending?: boolean;
   /** Error replacing the assistant turn if generation failed. */
   error?: string;
+  /**
+   * Raw intermediate dashboard JSON the LLM produced when validation
+   * failed — present alongside `error` so the chat bubble can expose it
+   * for debugging. In the LLM-emitted flat form (componentEntries +
+   * uiRootId), not the tree shape, since the failure happened before
+   * the server resolved it.
+   */
+  rawDashboard?: unknown;
 }
 
 export interface DashboardSession {

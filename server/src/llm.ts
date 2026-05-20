@@ -950,6 +950,22 @@ export interface LLMResult {
   dashboard: Dashboard | null;
 }
 
+/**
+ * Thrown when the LLM produced an intermediate dashboard JSON that
+ * failed validation in `toDashboard` — e.g. a param with neither a
+ * literal value nor a stateKey, or a setStateAndRefresh action missing
+ * its slot. Carries the raw intermediate JSON so the caller can
+ * surface it for debugging instead of just an opaque message.
+ */
+export class DashboardValidationError extends Error {
+  readonly intermediate: unknown;
+  constructor(message: string, intermediate: unknown) {
+    super(message);
+    this.name = "DashboardValidationError";
+    this.intermediate = intermediate;
+  }
+}
+
 function toAction(a: IntermediateAction, ownerId: string): import("./spec/ui.js").Action {
   switch (a.kind) {
     case "refresh":
@@ -1200,8 +1216,16 @@ export async function generateDashboardViaLLM(
   const content = completion.choices[0]?.message.content;
   if (!content) throw new Error("OpenAI returned an empty completion.");
   const parsed = JSON.parse(content) as IntermediateResponse;
-  return {
-    reply: parsed.reply,
-    dashboard: parsed.dashboard ? toDashboard(parsed.dashboard) : null,
-  };
+  let dashboard: Dashboard | null = null;
+  if (parsed.dashboard) {
+    try {
+      dashboard = toDashboard(parsed.dashboard);
+    } catch (e) {
+      throw new DashboardValidationError(
+        e instanceof Error ? e.message : String(e),
+        parsed.dashboard,
+      );
+    }
+  }
+  return { reply: parsed.reply, dashboard };
 }

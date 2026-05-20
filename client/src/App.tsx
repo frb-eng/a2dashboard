@@ -8,7 +8,7 @@ import Stack from "@mui/material/Stack";
 import { ConversationPanel } from "./components/ConversationPanel";
 import { DashboardView } from "./components/DashboardView";
 import { SessionList } from "./components/SessionList";
-import { generate } from "./api";
+import { generate, GenerateError } from "./api";
 import {
   createSession,
   deriveTitle,
@@ -121,10 +121,13 @@ export default function App() {
       });
     } catch (e) {
       const msg = e instanceof Error ? e.message : String(e);
+      const rawDashboard = e instanceof GenerateError ? e.rawDashboard : undefined;
       updateSession(sessionId, (s) => ({
         ...s,
         messages: s.messages.map((m) =>
-          m.id === pendingMsg.id ? { ...m, pending: false, error: msg } : m,
+          m.id === pendingMsg.id
+            ? { ...m, pending: false, error: msg, rawDashboard }
+            : m,
         ),
         updatedAt: Date.now(),
       }));
