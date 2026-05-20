@@ -41,31 +41,6 @@ export class GenerateError extends Error {
   }
 }
 
-export interface MermaidResponse {
-  mermaid: string;
-  model: string;
-}
-
-export async function generateMermaid(dashboard: Dashboard): Promise<MermaidResponse> {
-  const res = await fetch("/api/mermaid", {
-    method: "POST",
-    headers: { "content-type": "application/json" },
-    body: JSON.stringify({ dashboard }),
-  });
-  if (!res.ok) {
-    const text = await res.text();
-    let detail = text;
-    try {
-      const parsed = JSON.parse(text) as { error?: string };
-      if (parsed.error) detail = parsed.error;
-    } catch {
-      // fall through to plain-text body
-    }
-    throw new Error(`Server returned ${res.status}: ${detail}`);
-  }
-  return (await res.json()) as MermaidResponse;
-}
-
 export async function generate(req: GenerateRequest): Promise<GenerateResponse> {
   const res = await fetch("/api/generate", {
     method: "POST",

@@ -4,6 +4,21 @@ All notable releases of `a2dashboard` are listed here. The README's
 Milestones table is the short-form view; this file holds the full
 release notes per tag.
 
+## Unreleased
+
+- **Diagram view: deterministic, client-side, Cytoscape.** The
+  "Diagram" toggle no longer round-trips to the LLM. The client walks
+  the dashboard JSON, emits a typed `{ nodes, edges }` graph directly,
+  and renders it with [Cytoscape](https://js.cytoscape.org/) using the
+  `cytoscape-dagre` layered DAG layout. Same four layers (UI / data /
+  endpoint / state) with the same edge semantics (solid for
+  containment / `rows` / `source` / `endpoint` / union tags, dotted
+  for state writes and param refs), but the picture is now exactly
+  what the JSON says — no model deviation, no regenerate button, no
+  cached SVG. The server-side `POST /api/mermaid` endpoint, the
+  `mermaid.ts` LLM call, and the `mermaid` npm dependency are gone;
+  `cytoscape` + `cytoscape-dagre` replace them client-side.
+
 ## v0.0.4 — Charts, cross-entity comparison, and a wiring diagram (2026-05-20)
 
 Fourth tagged milestone. Dashboards stop being tables-only and start

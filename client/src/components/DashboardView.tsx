@@ -1,7 +1,7 @@
 /**
  * Container that displays a generated dashboard with a toggle between
- * the live rendered view, the raw JSON spec, and an LLM-generated
- * mermaid diagram of how the spec's primitives are wired together.
+ * the live rendered view, the raw JSON spec, and a Cytoscape diagram of
+ * how the spec's primitives are wired together.
  */
 
 import { useState } from "react";
@@ -18,7 +18,7 @@ import AccountTreeIcon from "@mui/icons-material/AccountTree";
 import type { Dashboard } from "../spec";
 import { Renderer } from "../renderer/Renderer";
 import { DashboardJsonView } from "./DashboardJsonView";
-import { DashboardMermaidView } from "./DashboardMermaidView";
+import { DashboardDiagramView } from "./DashboardDiagramView";
 
 type Mode = "dashboard" | "json" | "diagram";
 
@@ -65,7 +65,7 @@ export function DashboardView({ dashboard, model }: DashboardViewProps) {
         ) : mode === "json" ? (
           <DashboardJsonView dashboard={dashboard} />
         ) : (
-          <DashboardMermaidView dashboard={dashboard} />
+          <DashboardDiagramView dashboard={dashboard} />
         )}
       </Box>
     </Stack>
