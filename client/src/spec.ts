@@ -217,6 +217,12 @@ export interface RowsBinding {
   type: "rows";
   /** Id of an endpoint call in `Dashboard.endpoints`. */
   endpoint: string;
+  /**
+   * Dotted path into the response body when the rows aren't at the top
+   * level. Omit for catalogued GitHub endpoints. Endpoints whose body is
+   * a single object instead of an array (e.g. `github.repo`) are wrapped
+   * by the engine as a 1-row stream — no `rowsPath` needed.
+   */
   rowsPath?: string;
 }
 

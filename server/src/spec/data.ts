@@ -22,6 +22,9 @@ export interface RowsBinding {
    * Optional dotted path inside the response that contains the rows array.
    * Omit when the response body is already the array (e.g. the GitHub
    * `/users/{username}/repos` endpoint returns a top-level array).
+   * Endpoints whose body is a single object instead of an array (e.g.
+   * `github.repo` → GET /repos/{owner}/{repo}) are wrapped by the engine
+   * as a 1-row stream — no `rowsPath` needed.
    */
   rowsPath?: string;
 }

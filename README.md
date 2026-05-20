@@ -509,6 +509,52 @@ one `union`:
 }
 ```
 
+#### Comparison by per-repo scalar via `github.repo` + `union`
+
+When the user wants to compare a *scalar repo-level metric* across
+several named repos — "total stars for react / angular / vue", "open
+issues across X / Y / Z", "forks for these three repos" — reach for
+`github.repo`. Its response is a single repo object that the engine
+wraps as a one-row stream carrying `stargazers_count` / `forks_count` /
+`open_issues_count` / `watchers_count` etc. The pipeline is N
+`github.repo` calls → N `rows` bindings → one `union` (per-repo tag
+under `tagField`) → a `barChart` with `categoryField` equal to the
+union's `tagField` and `valueField` equal to the scalar field;
+`seriesField` is null because each repo is already its own bar (one row
+per union source). No `group` is needed — there is nothing to count, the
+metric is already on the row:
+
+```jsonc
+{
+  "ui": {
+    "type": "barChart", "id": "stars_chart",
+    "title": "Total stars: react vs angular vs vue",
+    "rows": "framework_repos_union",
+    "categoryField": "repo",
+    "valueField":    "stargazers_count"
+  },
+  "data": {
+    "react_repo":   { "type": "rows", "endpoint": "react_repo_call" },
+    "angular_repo": { "type": "rows", "endpoint": "angular_repo_call" },
+    "vue_repo":     { "type": "rows", "endpoint": "vue_repo_call" },
+    "framework_repos_union": {
+      "type": "union",
+      "tagField": "repo",
+      "sources": [
+        { "source": "react_repo",   "tag": "react"   },
+        { "source": "angular_repo", "tag": "angular" },
+        { "source": "vue_repo",     "tag": "vue"     }
+      ]
+    }
+  },
+  "endpoints": {
+    "react_repo_call":   { "endpointId": "github.repo", "params": { "owner": "facebook", "repo": "react"   }, "refresh": { "kind": "on-mount" } },
+    "angular_repo_call": { "endpointId": "github.repo", "params": { "owner": "angular",  "repo": "angular" }, "refresh": { "kind": "on-mount" } },
+    "vue_repo_call":     { "endpointId": "github.repo", "params": { "owner": "vuejs",    "repo": "vue"     }, "refresh": { "kind": "on-mount" } }
+  }
+}
+```
+
 #### Comparison by derived per-entity count via `group`
 
 When the user wants a derived per-entity value rather than the rows
@@ -565,7 +611,7 @@ renderer's evaluator stays finite and reviewable. New operators (group
 
 | Binding | What it produces | Key fields |
 |---|---|---|
-| `rows` | Raw rows from a catalogued endpoint. The response is treated as the row array, or descended via `rowsPath` when it isn't already an array. | `endpoint` (endpoint entry id), `rowsPath?` |
+| `rows` | Raw rows from a catalogued endpoint. The response is treated as the row array, or descended via `rowsPath` when it isn't already an array. Endpoints whose body is a single object instead of an array (e.g. `github.repo`) are wrapped as a one-row stream — the row carries every top-level field of the response, so `stargazers_count` / `forks_count` etc. read like any other row field downstream. | `endpoint` (endpoint entry id), `rowsPath?` |
 | `filter` | Rows from another binding, keeping only those whose `field` matches `value`. Chains: a filter's `source` can itself be another filter, `sort`, or `limit`. Evaluated inside the same hook as the data fetch, so it re-runs on `button`-triggered refresh — typing alone does NOT re-filter. | `source` (id of another binding), `field` (dotted path), `op`, `value` (literal or `{ stateKey }`) |
 | `sort` | Rows from another binding, reordered by a single `field`. Comparison is numeric when both values are finite numbers, else string-coerced (case-sensitive); `null` / `undefined` sort to the end regardless of direction. Use for orderings the endpoint can't express server-side — e.g. `github.userRepos` has no "by stars" sort, so a client-side `sort` on `stargazers_count` desc + a `limit` is the "top N by stars" pattern. | `source` (id of another binding), `field` (dotted path), `direction` (`asc` / `desc`) |
 | `limit` | The first `count` rows of another binding — the "top N" primitive. The source's row order is preserved verbatim, so pair `limit` with an endpoint whose response is already usefully ordered (e.g. `github.repoContributors` returns contributors by commit count desc) or stack `limit` on top of `sort` for "top N by X". Chains freely: `limit` over `sort` over `filter` over `rows` is the canonical filtered-and-sorted-top-N pipeline. | `source` (id of another binding), `count` (non-negative integer) |
@@ -644,10 +690,16 @@ press **Apply** again to see everything.
 ## Supported data sources
 
 The endpoint catalog is hardcoded in `server/src/catalog/github.ts`
-and serves three GitHub REST endpoints under `https://api.github.com`.
+and serves four GitHub REST endpoints under `https://api.github.com`.
 Requests can be unauthenticated for public data (60 req/hour) or
 authenticated with a GitHub Personal Access Token via
 `Authorization: Bearer <token>` (5000 req/hour).
+
+Endpoints whose body is a single object instead of an array (`github.repo`)
+are wrapped by the aggregation engine as a 1-row stream. The catalog
+entry's `responseIsArray: false` flag is the single source of truth — the
+`rows` binding stays the same, and downstream `union` / `barChart` work
+unchanged.
 
 A future iteration will accept user-registered APIs (OpenAPI ingest)
 per tenant; the catalog interface is kept narrow on purpose so that
@@ -671,6 +723,29 @@ Paginated list of a user's public repositories.
 Row fields commonly used in column bindings: `name`, `full_name`,
 `html_url`, `description`, `stargazers_count`, `forks_count`,
 `open_issues_count`, `language`, `updated_at`, `owner.login`.
+
+### `github.repo` — fetch a single repository's metadata
+
+`GET https://api.github.com/repos/{owner}/{repo}`
+
+The repository as a single JSON object — stars, forks, open-issue count,
+watchers, language, default branch, owner, timestamps, etc. The response
+is **not** an array; the aggregation engine wraps it as a one-row stream
+so the same `rows` / `union` / `barChart` vocabulary works. Use this when
+the user asks for a per-repo *scalar* metric ("total stars for these
+three repos", "forks across X / Y / Z") rather than a list of items
+inside the repo.
+
+| Param | In | Required | Notes |
+|---|---|---|---|
+| `owner` | path | yes | Repository owner (user or org). |
+| `repo` | path | yes | Repository name. |
+
+Row fields commonly used in column bindings or `barChart.valueField`:
+`name`, `full_name`, `html_url`, `description`, `stargazers_count`,
+`watchers_count`, `forks_count`, `open_issues_count`,
+`subscribers_count`, `network_count`, `language`, `default_branch`,
+`created_at`, `updated_at`, `pushed_at`, `owner.login`.
 
 ### `github.repoIssues` — list issues for a repository
 

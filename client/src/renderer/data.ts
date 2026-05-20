@@ -196,16 +196,24 @@ async function fetchRowsBinding(
     throw new Error(`GET ${url} returned ${res.status}: ${text.slice(0, 200)}`);
   }
   const body = (await res.json()) as unknown;
-  const rows = binding.rowsPath ? readPath(body, binding.rowsPath) : body;
+  const extracted = binding.rowsPath ? readPath(body, binding.rowsPath) : body;
 
-  if (!Array.isArray(rows)) {
-    throw new Error(
-      `Expected an array of rows from "${call.endpointId}"` +
-        (binding.rowsPath ? ` at path "${binding.rowsPath}"` : "") +
-        `, got ${typeof rows}.`,
-    );
+  if (Array.isArray(extracted)) {
+    return extracted as Record<string, unknown>[];
   }
-  return rows as Record<string, unknown>[];
+  // Single-object endpoints (e.g. `github.repo` → GET /repos/{owner}/{repo})
+  // are wrapped as a 1-row stream so the same `rows` / `union` / `barChart`
+  // vocabulary that works for array endpoints works here too — three
+  // `github.repo` calls unioned together produces three rows, one per repo,
+  // each carrying `stargazers_count` etc.
+  if (!entry.responseIsArray && extracted != null && typeof extracted === "object") {
+    return [extracted as Record<string, unknown>];
+  }
+  throw new Error(
+    `Expected an array of rows from "${call.endpointId}"` +
+      (binding.rowsPath ? ` at path "${binding.rowsPath}"` : "") +
+      `, got ${typeof extracted}.`,
+  );
 }
 
 function compareDefined(a: unknown, b: unknown): number {
