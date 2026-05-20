@@ -701,6 +701,17 @@ entry's `responseIsArray: false` flag is the single source of truth — the
 `rows` binding stays the same, and downstream `union` / `barChart` work
 unchanged.
 
+Paginated endpoints declare their pagination contract on the catalog
+entry — which query param carries the page index, which carries the page
+size, the page size used when the spec doesn't set one, and a hard cap
+on pages walked per `rows` binding. A `rows` binding against such an
+endpoint auto-walks the page sequence until a short page comes back
+(the canonical "this is the last page" signal) or the cap is hit, then
+concatenates the pages into one row stream. `group` `count` over a
+union of paginated endpoints therefore reports real totals — not a
+first-page-only undercount. Per-endpoint pagination defaults are listed
+in each endpoint's section below.
+
 A future iteration will accept user-registered APIs (OpenAPI ingest)
 per tenant; the catalog interface is kept narrow on purpose so that
 swap stays cheap.
@@ -719,6 +730,10 @@ Paginated list of a user's public repositories.
 | `direction` | query | no | `asc` · `desc` |
 | `page` | query | no | Page number (1-based). |
 | `per_page` | query | no | Results per page (max 100). |
+
+Pagination: `pageParam: "page"`, `pageSizeParam: "per_page"`,
+`defaultPageSize: 100`, `maxPages: 20` — the engine auto-walks up to
+2000 rows per binding unless the spec sets `per_page` itself.
 
 Row fields commonly used in column bindings: `name`, `full_name`,
 `html_url`, `description`, `stargazers_count`, `forks_count`,
@@ -765,6 +780,10 @@ Paginated list of issues for a repository.
 | `page` | query | no | Page number (1-based). |
 | `per_page` | query | no | Results per page (max 100). |
 
+Pagination: `pageParam: "page"`, `pageSizeParam: "per_page"`,
+`defaultPageSize: 100`, `maxPages: 20` — the engine auto-walks up to
+2000 issues per binding unless the spec sets `per_page` itself.
+
 Row fields commonly used in column bindings: `number`, `title`,
 `state`, `html_url`, `user.login`, `comments`, `created_at`,
 `updated_at`.
@@ -784,6 +803,11 @@ top-contributor leaderboards.
 | `anon` | query | no | `1` / `true` to include anonymous contributors (matched by email). |
 | `page` | query | no | Page number (1-based). |
 | `per_page` | query | no | Results per page (max 100). |
+
+Pagination: `pageParam: "page"`, `pageSizeParam: "per_page"`,
+`defaultPageSize: 100`, `maxPages: 20` — the engine auto-walks up to
+2000 contributors per binding, so `group` `count` reports real
+contributor totals instead of the first-page-only 30.
 
 Row fields commonly used in column bindings: `login`, `avatar_url`,
 `html_url`, `type` (`User` · `Bot` · `Anonymous`), and `contributions`

@@ -354,10 +354,25 @@ export interface CatalogParam {
   required: boolean;
 }
 
+/**
+ * Per-endpoint pagination contract — mirrors `EndpointPagination` on the
+ * server. Presence means the aggregation engine will auto-walk pages of
+ * this endpoint for a `rows` binding (page index in `pageParam`, page
+ * size in `pageSizeParam`, page size defaulted to `defaultPageSize` when
+ * the spec doesn't set one, capped at `maxPages` per binding).
+ */
+export interface CatalogPagination {
+  pageParam: string;
+  pageSizeParam: string;
+  defaultPageSize: number;
+  maxPages: number;
+}
+
 export interface CatalogEntry {
   id: string;
   method: "GET";
   urlTemplate: string;
   params: CatalogParam[];
   responseIsArray: boolean;
+  pagination?: CatalogPagination;
 }

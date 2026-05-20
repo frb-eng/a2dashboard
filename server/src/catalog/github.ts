@@ -15,6 +15,35 @@ export interface EndpointParam {
   description: string;
 }
 
+/**
+ * Per-endpoint pagination contract. The aggregation engine consults this
+ * to decide whether — and how — to auto-walk pages for a `rows` binding.
+ *
+ * The catalog is the single source of truth: every paginated endpoint
+ * names the params that carry the page index and page size, the page
+ * size the engine should use when the spec doesn't set one, and a hard
+ * cap on pages walked per binding (the rate-limit / runaway-loop guard).
+ *
+ * End-of-stream is the conventional "short page": when an upstream page
+ * returns fewer rows than `defaultPageSize` (or the spec's overriding
+ * `pageSizeParam` value), the engine stops. Every catalogued endpoint
+ * today honors this convention; cursor-paginated endpoints would land
+ * as a discriminated variant on this shape.
+ */
+export interface EndpointPagination {
+  /** Query param carrying the 1-based page index, e.g. `"page"`. */
+  pageParam: string;
+  /** Query param carrying the number of rows per page, e.g. `"per_page"`. */
+  pageSizeParam: string;
+  /** Page size used when the dashboard spec doesn't set `pageSizeParam`. */
+  defaultPageSize: number;
+  /**
+   * Maximum pages walked for a single `rows` binding. Hard ceiling that
+   * caps both row count and rate-limit consumption per binding.
+   */
+  maxPages: number;
+}
+
 export interface EndpointDefinition {
   id: string;
   method: "GET";
@@ -25,6 +54,13 @@ export interface EndpointDefinition {
   params: EndpointParam[];
   /** Whether the response body is itself an array of rows. */
   responseIsArray: boolean;
+  /**
+   * Pagination contract; presence means "this endpoint returns a
+   * paginated array stream and the engine should auto-walk pages".
+   * Omit on single-object endpoints (`github.repo`) or any future
+   * non-paginated endpoint.
+   */
+  pagination?: EndpointPagination;
   /** A short list of fields available on each row, for LLM grounding. */
   rowFields: { name: string; type: string }[];
 }
@@ -44,6 +80,12 @@ export const githubCatalog: EndpointDefinition[] = [
       { name: "per_page",  in: "query", required: false, description: "Results per page (max 100)." },
     ],
     responseIsArray: true,
+    pagination: {
+      pageParam: "page",
+      pageSizeParam: "per_page",
+      defaultPageSize: 100,
+      maxPages: 20,
+    },
     rowFields: [
       { name: "name",             type: "string" },
       { name: "full_name",        type: "string" },
@@ -104,6 +146,12 @@ export const githubCatalog: EndpointDefinition[] = [
       { name: "per_page",  in: "query", required: false, description: "Results per page (max 100)." },
     ],
     responseIsArray: true,
+    pagination: {
+      pageParam: "page",
+      pageSizeParam: "per_page",
+      defaultPageSize: 100,
+      maxPages: 20,
+    },
     rowFields: [
       { name: "number",        type: "number" },
       { name: "title",         type: "string" },
@@ -129,6 +177,12 @@ export const githubCatalog: EndpointDefinition[] = [
       { name: "per_page", in: "query", required: false, description: "Results per page (max 100)." },
     ],
     responseIsArray: true,
+    pagination: {
+      pageParam: "page",
+      pageSizeParam: "per_page",
+      defaultPageSize: 100,
+      maxPages: 20,
+    },
     rowFields: [
       { name: "login",         type: "string (absent for anonymous contributors)" },
       { name: "id",            type: "number (absent for anonymous contributors)" },
