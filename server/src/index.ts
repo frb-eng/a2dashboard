@@ -3,8 +3,6 @@ import cors from "cors";
 import { generateDashboard, type GenerateRequest } from "./generate.js";
 import { githubCatalog } from "./catalog/github.js";
 import { assertLLMConfigured, DashboardValidationError, MODEL } from "./llm.js";
-import { generateMermaidViaLLM } from "./mermaid.js";
-import type { Dashboard } from "./spec/dashboard.js";
 
 try {
   assertLLMConfigured();
@@ -68,23 +66,6 @@ app.post("/api/generate", async (req: Request, res: Response) => {
     }
     res.status(502).json({
       error: err instanceof Error ? err.message : "Dashboard generation failed.",
-    });
-  }
-});
-
-app.post("/api/mermaid", async (req: Request, res: Response) => {
-  const body = req.body as { dashboard?: Dashboard } | undefined;
-  if (!body || !body.dashboard || typeof body.dashboard !== "object") {
-    res.status(400).json({ error: "Body must be { dashboard: Dashboard }." });
-    return;
-  }
-  try {
-    const mermaid = await generateMermaidViaLLM(body.dashboard);
-    res.json({ mermaid, model: MODEL });
-  } catch (err) {
-    console.error("generateMermaid failed:", err);
-    res.status(502).json({
-      error: err instanceof Error ? err.message : "Mermaid generation failed.",
     });
   }
 });
