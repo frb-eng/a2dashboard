@@ -25,6 +25,7 @@ export type {
   UINode,
   TableNode,
   TableColumn,
+  BarChartNode,
   RowNode,
   ColumnNode,
   ListNode,

@@ -5,6 +5,8 @@
  *   - `table`     — data-producing container (renders rows from a binding).
  *                   Cells can hold either a raw field path or an arbitrary
  *                   nested UI node — see `TableColumn`.
+ *   - `barChart`  — data-producing leaf (renders rows from a binding as a
+ *                   vertical bar chart with one bar per row).
  *   - `row`       — horizontal flex layout container.
  *   - `column`    — vertical flex layout container.
  *   - `list`      — uniform flex layout with a configurable axis.
@@ -81,6 +83,26 @@ export interface TableNode {
    * crossing the LLM→client boundary. When absent, rows are inert.
    */
   onRowClick?: Action;
+}
+
+/**
+ * Vertical bar chart bound to a row-producing binding. One bar per row;
+ * `categoryField` resolves the x-axis label and `valueField` resolves the
+ * y-axis numeric value, both as dotted paths into the row. Non-numeric or
+ * missing values render as 0. No transformation lives here — for "top N
+ * by X" pipe the binding through `sort` + `limit` upstream.
+ */
+export interface BarChartNode {
+  type: "barChart";
+  id: string;
+  /** Optional caption rendered above the chart. */
+  title?: string;
+  /** Id of a row-producing binding in `Dashboard.data`. */
+  rows: string;
+  /** Dotted path into each row used as the bar's x-axis label. */
+  categoryField: string;
+  /** Dotted path into each row used as the bar's y-axis numeric value. */
+  valueField: string;
 }
 
 export interface RowNode {
@@ -275,6 +297,7 @@ export interface ButtonNode {
 /** Discriminated union over every UI primitive. */
 export type UINode =
   | TableNode
+  | BarChartNode
   | RowNode
   | ColumnNode
   | ListNode

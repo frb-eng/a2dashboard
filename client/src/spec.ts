@@ -47,6 +47,22 @@ export interface TableNode {
   onRowClick?: Action;
 }
 
+/**
+ * Vertical bar chart bound to a row-producing binding. One bar per row;
+ * `categoryField` is a dotted path into the row used as the x-axis
+ * label and `valueField` is a dotted path used as the y-axis numeric
+ * value. For "top N by X", chain the binding through `sort` + `limit`.
+ */
+export interface BarChartNode {
+  type: "barChart";
+  id: string;
+  title?: string;
+  /** Id of a row-producing binding in `Dashboard.data`. */
+  rows: string;
+  categoryField: string;
+  valueField: string;
+}
+
 export interface RowNode {
   type: "row";
   id: string;
@@ -182,6 +198,7 @@ export interface ButtonNode {
 
 export type UINode =
   | TableNode
+  | BarChartNode
   | RowNode
   | ColumnNode
   | ListNode

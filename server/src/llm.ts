@@ -77,6 +77,15 @@ interface IntermediateTableComponent {
   onRowClick: IntermediateAction | null;
 }
 
+interface IntermediateBarChartComponent {
+  type: "barChart";
+  id: string;
+  title: string | null;
+  rows: string;
+  categoryField: string;
+  valueField: string;
+}
+
 interface IntermediateRowComponent {
   type: "row";
   id: string;
@@ -229,6 +238,7 @@ interface IntermediateButtonComponent {
 
 type IntermediateComponent =
   | IntermediateTableComponent
+  | IntermediateBarChartComponent
   | IntermediateRowComponent
   | IntermediateColumnComponent
   | IntermediateListComponent
@@ -382,6 +392,22 @@ function tableComponentSchema(): Record<string, unknown> {
   };
 }
 
+function barChartComponentSchema(): Record<string, unknown> {
+  return {
+    type: "object",
+    additionalProperties: false,
+    required: ["type", "id", "title", "rows", "categoryField", "valueField"],
+    properties: {
+      type: { type: "string", enum: ["barChart"] },
+      id: { type: "string" },
+      title: { type: ["string", "null"] },
+      rows: { type: "string" },
+      categoryField: { type: "string" },
+      valueField: { type: "string" },
+    },
+  };
+}
+
 function flexComponentSchema(typeLiteral: "row" | "column"): Record<string, unknown> {
   return {
     type: "object",
@@ -517,6 +543,7 @@ function componentSchema(): Record<string, unknown> {
   return {
     anyOf: [
       tableComponentSchema(),
+      barChartComponentSchema(),
       flexComponentSchema("row"),
       flexComponentSchema("column"),
       listComponentSchema(),
@@ -742,7 +769,7 @@ WHEN TO PRODUCE A DASHBOARD (dashboard != null)
 WHEN TO RETURN dashboard: null
   - The request makes no sense, is empty, or is unrelated to building a dashboard (small talk, greetings, off-topic). Reply briefly and offer guidance on what you CAN build.
   - The request is too ambiguous to act on without guessing wildly. Ask one focused clarifying question in \`reply\`.
-  - The request needs a primitive that does not exist yet (e.g. a chart, KPI tile, map, form). Name what is missing in plain language ("I can only render tables and layout containers right now — charts aren't supported yet.").
+  - The request needs a primitive that does not exist yet (e.g. a KPI tile, map, form, line / pie / scatter chart). Name what is missing in plain language. \`barChart\` is supported; other chart types are not.
   - The request needs data this server cannot reach (any source other than the catalogued GitHub endpoints below — e.g. Stripe, Strava, internal APIs, file uploads, databases). Name the missing endpoint and what is available.
   - The user is asking a question about the current dashboard or the system rather than asking for a change. Answer in \`reply\`.
   - Never invent endpoints, primitives, or fields not listed below to "make it work". Refuse and explain.
@@ -755,6 +782,7 @@ THREE-LAYER MODEL (when producing a dashboard)
                         Each column is { id, header, field, cellId }. Set EXACTLY ONE of \`field\` or \`cellId\` per column (the other must be null):
                             * \`field\` (dotted path into the row) — render the value directly as text.
                             * \`cellId\` (id of any component) — render that component inside every cell. Inside the cell, descendant \`text\` nodes resolve their \`field\` against the row.
+       - \`barChart\`  — data-producing leaf. Fields: \`rows\` (binding id), \`categoryField\` (dotted path into each row used as the x-axis label), \`valueField\` (dotted path into each row used as the y-axis numeric value), optional \`title\`. One bar per row. No transformation lives here — for "top N by X" pipe the binding through \`sort\` + \`limit\` upstream, the same way you would for a table.
        - \`row\`       — horizontal flex container. Fields: \`childIds\` (component ids), optional \`title\`, \`justify\`, \`align\`.
        - \`column\`    — vertical flex container. Fields: \`childIds\` (component ids), optional \`title\`, \`justify\`, \`align\`.
        - \`list\`      — uniform layout container. Fields: \`childIds\` (component ids), optional \`title\`, \`direction\` ("vertical" | "horizontal"), \`align\`.
@@ -788,7 +816,7 @@ THREE-LAYER MODEL (when producing a dashboard)
 Cross-layer references use string ids and names:
   - uiRootId must equal some componentEntries[*].id
   - childIds[*], childId, tabs[*].childId, and columns[*].cellId must each equal some componentEntries[*].id (when not null)
-  - table.rows must equal some dataEntries[*].id
+  - table.rows and barChart.rows must each equal some dataEntries[*].id
   - filter, sort, and limit binding \`source\` must each equal some other dataEntries[*].id (and must not form a cycle)
   - rows binding \`endpoint\` must equal some endpointEntries[*].id
   - endpointEntries[*].call.endpointId must equal a catalogued endpoint id
@@ -800,6 +828,7 @@ ${catalogForPrompt()}
 
 GUIDANCE
   - Prefer a single \`table\` at the root when one is enough. Reach for containers (\`row\`, \`column\`, \`list\`, \`card\`, \`tabs\`) only when the user actually asks for multiple panels, grouped sections, or switchable views.
+  - When the user asks for a chart, graph, or "visualize as bars / columns", use \`barChart\`. \`categoryField\` is the dotted path on each row for the x-axis label (e.g. "login", "name") and \`valueField\` is the dotted path for the y-axis numeric value (e.g. "contributions", "stargazers_count"). For a "top N" bar chart, point \`rows\` at the same \`limit\`-on-top-of-\`sort\`-on-top-of-\`rows\` pipeline you would use for a top-N table — bar charts read the binding the same way tables do.
   - When you do use a container, give every component a distinct id and reference children by id.
   - \`card\` accepts a single \`childId\`. To put several things in a card, wrap them in a \`column\`/\`row\`/\`list\` and point \`childId\` at that container.
   - \`tabs\` must have at least one entry. Each tab is a { title, childId } pair; the child is whatever component should appear when the tab is active.
@@ -882,6 +911,15 @@ function buildUITree(
               : {}),
           })),
           ...(c.onRowClick ? { onRowClick: toAction(c.onRowClick, c.id) } : {}),
+        };
+      case "barChart":
+        return {
+          type: "barChart",
+          id: c.id,
+          ...(c.title ? { title: c.title } : {}),
+          rows: c.rows,
+          categoryField: c.categoryField,
+          valueField: c.valueField,
         };
       case "row":
         return {

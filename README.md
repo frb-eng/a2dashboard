@@ -247,10 +247,11 @@ ours and the operating cost much higher.
 
 ## Supported components
 
-The renderer ships ten UI primitives. The LLM is told about exactly
+The renderer ships eleven UI primitives. The LLM is told about exactly
 these — any request that would require a primitive not listed here is
 refused with a textual reply, rather than faked. Vocabulary is borrowed
-from Google's a2ui basic catalog so a spec written against this
+from Google's a2ui basic catalog (`barChart` is the one chart-shaped
+extension on top of that catalog) so a spec written against this
 renderer reads sensibly against any other a2ui-compatible one.
 
 Every component has a stable `id` (preserved across patches) and an
@@ -261,6 +262,7 @@ optional `title`. The fields below are in addition to those.
 | Component | What it is | Key fields |
 |---|---|---|
 | `table` | Renders rows from a binding. Each column is either a raw `field` path or a nested `cell` UI node; cell subtrees see the current row via a React context, so a `text` leaf inside a cell can `field`-bind against it. An optional `onRowClick` action turns rows into a master-detail trigger — clicking a row dispatches the action with the clicked row in scope. | `rows` (binding id), `columns[]` of `{ id, header, field?, cell? }`, `onRowClick?` |
+| `barChart` | Renders rows from a binding as a vertical bar chart — one bar per row. `categoryField` is a dotted path into each row used as the x-axis label; `valueField` is a dotted path used as the y-axis numeric value (non-numeric / missing values render as 0). No transformation lives here — for "top N by X", pipe the binding through `sort` + `limit` the same way you would for a table. Rendered with Highcharts. | `rows` (binding id), `categoryField`, `valueField` |
 
 ### Layout containers (flex)
 
@@ -430,6 +432,37 @@ spec carries no extra annotation — the catalog's `required` flag plus
 "the param's value is a `{ stateKey }` whose slot is empty" is the
 whole rule.
 
+#### Bar chart bound to a row pipeline
+
+`barChart` consumes a row binding the same way `table` does — point its
+`rows` at any binding (raw or piped through `sort` + `limit`), pick the
+two field paths, done. "Top 10 contributors to `facebook/react` as a
+bar chart" needs no `sort` (the contributors endpoint is already
+ordered by commit count desc), just a `limit`:
+
+```jsonc
+{
+  "ui": {
+    "type": "barChart", "id": "top_contribs",
+    "title": "Top contributors to facebook/react",
+    "rows": "top_contribs_binding",
+    "categoryField": "login",
+    "valueField":    "contributions"
+  },
+  "data": {
+    "all_contribs":         { "type": "rows",  "endpoint": "contribs_call" },
+    "top_contribs_binding": { "type": "limit", "source": "all_contribs", "count": 10 }
+  },
+  "endpoints": {
+    "contribs_call": {
+      "endpointId": "github.repoContributors",
+      "params":     { "owner": "facebook", "repo": "react" },
+      "refresh":    { "kind": "on-mount" }
+    }
+  }
+}
+```
+
 ## Bindings
 
 The `data` map holds the bindings that produce rows for tables. Each
@@ -592,7 +625,7 @@ Row fields commonly used in column bindings: `login`, `avatar_url`,
 
 The current implementation is deliberately narrow — just enough surface area to validate the three-layer model end-to-end. Everything else (charts, KPIs, aggregations, more endpoints, alternative renderers) lands as a named extension to this MVP, not by quietly widening it.
 
-- **UI:** the ten primitives listed under [Supported components](#supported-components). Rendered with React + MUI.
+- **UI:** the eleven primitives listed under [Supported components](#supported-components). Rendered with React + MUI, plus Highcharts for `barChart`.
 - **Aggregation:** the four bindings listed under [Bindings](#bindings) — `rows` for raw endpoint responses, `filter` (op `containsIgnoreCase`) for client-side text filtering, `sort` for client-side ordering by a row field, and `limit` for "top N" truncation. No `group` / `agg` / `join` / `time-bucket` yet.
 - **Endpoint catalog:** the three GitHub endpoints listed under [Supported data sources](#supported-data-sources). Pagination is the only data-side behavior; refresh policy is `on-mount` or `manual`. Endpoint param values may also be `{ stateKey }` references that resolve against shared state slots at fetch time — slots are written by `textField` keystrokes or by `setStateAndRefresh` actions fired from buttons or row clicks — making a button-driven "type → search" or click-driven "select → detail" dashboard expressible without any code escape hatch. The renderer holds a fetch when a *required* catalog param (e.g. `repo` on `github.repoContributors`) is bound to a `{ stateKey }` whose slot is empty — the master-detail right panel sits idle until the row click writes the slot, instead of throwing "missing path param".
 
