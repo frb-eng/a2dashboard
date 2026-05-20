@@ -24,6 +24,7 @@ import Paper from "@mui/material/Paper";
 import Stack from "@mui/material/Stack";
 import Tooltip from "@mui/material/Tooltip";
 import Typography from "@mui/material/Typography";
+import { useTheme } from "@mui/material/styles";
 import RefreshIcon from "@mui/icons-material/Refresh";
 import Highcharts from "highcharts";
 import HighchartsReact from "highcharts-react-official";
@@ -51,6 +52,7 @@ export function BarChartRenderer({
     binding,
     dashboard,
   );
+  const theme = useTheme();
 
   const options = useMemo<Highcharts.Options>(() => {
     const categories: string[] = [];
@@ -60,17 +62,44 @@ export function BarChartRenderer({
       categories.push(cat == null ? "" : String(cat));
       data.push(toNumber(readPath(row, node.valueField)));
     }
+    // Highcharts defaults to light-theme grays for axis text and grid
+    // lines; against our MUI dark Paper they read as nearly-black. Pull
+    // colors from the active MUI theme so the chart follows whatever
+    // palette the app is using.
+    const textPrimary = theme.palette.text.primary;
+    const textSecondary = theme.palette.text.secondary;
+    const gridLine = theme.palette.divider;
+    const seriesColor = theme.palette.primary.main;
+    const axisLabelStyle = { color: textSecondary, fontSize: "12px" };
+    const axisTitleStyle = { color: textPrimary };
     return {
       chart: { type: "column", backgroundColor: "transparent" },
       title: { text: undefined },
       credits: { enabled: false },
       legend: { enabled: false },
-      xAxis: { categories, title: { text: node.categoryField } },
-      yAxis: { title: { text: node.valueField }, allowDecimals: false },
-      tooltip: { pointFormat: "<b>{point.y}</b>" },
-      series: [{ type: "column", name: node.valueField, data }],
+      xAxis: {
+        categories,
+        title: { text: node.categoryField, style: axisTitleStyle },
+        labels: { style: axisLabelStyle },
+        lineColor: gridLine,
+        tickColor: gridLine,
+      },
+      yAxis: {
+        title: { text: node.valueField, style: axisTitleStyle },
+        labels: { style: axisLabelStyle },
+        gridLineColor: gridLine,
+        allowDecimals: false,
+      },
+      tooltip: {
+        backgroundColor: theme.palette.background.paper,
+        borderColor: gridLine,
+        style: { color: textPrimary },
+        pointFormat: "<b>{point.y}</b>",
+      },
+      plotOptions: { column: { borderWidth: 0 } },
+      series: [{ type: "column", name: node.valueField, data, color: seriesColor }],
     };
-  }, [rows, node.categoryField, node.valueField]);
+  }, [rows, node.categoryField, node.valueField, theme]);
 
   if (!binding) {
     return (
