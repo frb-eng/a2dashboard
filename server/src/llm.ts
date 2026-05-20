@@ -891,7 +891,7 @@ THREE-LAYER MODEL (when producing a dashboard)
        - \`limit\`  — truncate another binding's rows to at most \`count\` entries — the "top N" primitive. Fields: \`source\` (id of another binding), \`count\` (non-negative integer literal). The source's row order is preserved, so pair this with an endpoint whose response is already ordered usefully (e.g. \`github.repoContributors\` returns contributors by commit count desc, so a \`limit\` over it gives "top N contributors") or stack \`limit\` on top of \`sort\` for "top N by X". Filters, sorts, and limits chain through \`source\` — a \`limit\` whose \`source\` is a \`sort\` whose \`source\` is a \`rows\` binding is the canonical "top N by X" pipeline.
        - \`union\`  — concatenate rows from several other bindings, stamping each row with a literal tag so downstream consumers can tell which source it came from. Fields: \`sources\` (array of { source, tag } — each \`source\` is the id of another binding in dataEntries; \`tag\` is the literal string written onto every row that source produces), \`tagField\` (flat field name where the tag is stored on each row). Use \`union\` to compare the same metric across several entities in one chart: build one \`rows\` (optionally + \`limit\`) binding per entity, union them with a per-entity tag, then point a \`barChart\` at the union with \`seriesField\` equal to \`tagField\`. Each source may itself be any binding variant — so "top 10 contributors per repo, unioned across three repos" is three \`limit\`-on-top-of-\`rows\` chains feeding one \`union\`. Cycles and dangling references are caught by the engine; don't reference a binding from inside its own \`sources\`.
        - \`group\`  — bucket another binding's rows by a flat field name and emit one output row per distinct key carrying the key plus an aggregated value. Fields: \`source\` (id of another binding), \`groupBy\` (flat field name read from each input row to bucket by — not a dotted path), \`op\` ("count" is the only aggregation op for now; sum / avg / min / max land later as new op values), \`as\` (flat field name where the aggregated value is written on each output row). Output rows preserve first-seen key order, so a \`union\` whose \`sources\` are listed [react, angular, vue] feeding a \`group\` produces buckets in that same order. Use \`group\` when the user asks for a derived per-bucket value (count, total, average) rather than the raw rows themselves — the canonical "compare N entities by row count" pipeline is N \`rows\` bindings → \`union\` (tagged by entity) → \`group\` (\`groupBy\` equal to the union's \`tagField\`, \`op\` "count"), with a \`barChart\` reading \`categoryField\`: \`groupBy\` and \`valueField\`: \`as\`.
-  3. endpointEntries — concrete invocations of catalogued endpoints (id + params + refresh). Each param is { name, value, stateKey } where EXACTLY ONE of \`value\` (literal scalar) and \`stateKey\` (name of a textField slot, read at fetch time) is non-null.
+  3. endpointEntries — concrete invocations of catalogued endpoints (id + params + refresh). Each entry in \`params\` is { name, value, stateKey } and should have exactly one of \`value\` (a literal scalar — string / number / boolean) or \`stateKey\` (the name of a textField slot, read at fetch time) set; the other should be null. The \`params\` array should only contain the params you are actually setting — for an optional catalog param you have no value for, OMIT it from the array entirely rather than listing it with both fields null. Required path params from the catalog (e.g. \`username\` on \`github.userRepos\`, \`owner\` / \`repo\` on \`github.repoIssues\` and \`github.repoContributors\`) MUST be listed with a concrete \`value\` or \`stateKey\` — if neither is provided, the renderer surfaces a "Missing required path param" error and the panel sits idle.
 
 Cross-layer references use string ids and names:
   - uiRootId must equal some componentEntries[*].id
@@ -926,7 +926,7 @@ GUIDANCE
   - For tables: pick 4–7 useful columns. Column \`field\` is a dotted path into the row object (e.g. "owner.login").
   - Use null for title, justify, align, direction, rowsPath when not needed; the catalogued endpoints return arrays at the top level so rowsPath is usually null.
   - Default refresh.kind to "on-mount".
-  - Only include params that exist in the catalog above. Required path params (e.g. username, owner, repo) must be present.
+  - Only include params that exist in the catalog above, and only include the ones you're actually setting. Omit optional params you have no value for — do not emit them with both \`value\` and \`stateKey\` null. Required path params (e.g. \`username\` on \`github.userRepos\`, \`owner\` / \`repo\` on \`github.repoIssues\` and \`github.repoContributors\`) must be listed with a concrete \`value\` (literal scalar) or \`stateKey\` (textField slot, when the user typed it or a row click writes it).
   - If the user names a GitHub user or owner/repo, use it verbatim. If the request is otherwise actionable but a minor detail is unspecified, pick a sensible default and proceed.${iteration}`;
 }
 
@@ -1115,13 +1115,17 @@ function toBinding(
         ...(b.rowsPath ? { rowsPath: b.rowsPath } : {}),
       };
     case "filter": {
-      if (b.stateKey == null && b.value == null) {
-        throw new Error(
-          `Filter binding "${id}" has neither a literal value nor a stateKey.`,
-        );
-      }
-      const value =
-        b.stateKey != null ? { stateKey: b.stateKey } : (b.value as string | number | boolean);
+      // Permissive shape: a filter binding with neither a literal
+      // value nor a stateKey resolves to an empty needle, which the
+      // engine already treats as "match all rows" (the "no filter
+      // active" UX). Keeps the dashboard renderable when the model
+      // leaves both fields null instead of picking one.
+      const value: string | number | boolean | { stateKey: string } =
+        b.stateKey != null
+          ? { stateKey: b.stateKey }
+          : b.value != null
+            ? b.value
+            : "";
       return { type: "filter", source: b.source, field: b.field, op: b.op, value };
     }
     case "limit":
@@ -1171,16 +1175,22 @@ function toDashboard(i: IntermediateDashboard): Dashboard {
         e.id,
         {
           endpointId: e.call.endpointId,
+          // Permissive shape: a param with neither a literal value nor a
+          // stateKey is treated as "not set" and dropped. The downstream
+          // URL builder already handles "param absent" — it skips
+          // optional params and throws a clear "Missing required path
+          // param" error if a required catalog param really isn't
+          // supplied. The LLM occasionally lists optional params with
+          // both fields null instead of omitting them; this lets that
+          // case render instead of failing the whole spec.
           params: Object.fromEntries(
-            e.call.params.map((p) => {
-              if (p.stateKey != null) return [p.name, { stateKey: p.stateKey }];
-              if (p.value == null) {
-                throw new Error(
-                  `Param "${p.name}" on endpoint "${e.id}" has neither a literal value nor a stateKey.`,
-                );
-              }
-              return [p.name, p.value];
-            }),
+            e.call.params.flatMap(
+              (p): [string, import("./spec/endpoint.js").EndpointParamValue][] => {
+                if (p.stateKey != null) return [[p.name, { stateKey: p.stateKey }]];
+                if (p.value != null) return [[p.name, p.value]];
+                return [];
+              },
+            ),
           ),
           refresh: e.call.refresh,
         },
