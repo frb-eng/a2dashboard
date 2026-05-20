@@ -101,7 +101,78 @@ export interface SortBinding {
 }
 
 /**
+ * Aggregation operator for the `group` binding. New ops (`sum`, `avg`,
+ * `min`, `max`) land as new enum values + matching evaluator branches —
+ * the same discipline as `FilterOp`. `count` doesn't read a per-row
+ * field; future numeric ops will require an additional `field` member
+ * on the binding, added in the same change as the op.
+ */
+export type GroupOp = "count";
+
+/**
+ * Buckets another binding's rows by a flat field name and emits one
+ * output row per distinct key, carrying the key plus the aggregated
+ * value. The MVP op is `count` (number of input rows in each bucket) —
+ * paired with a `union` upstream, this is "compare N entities by how
+ * many rows each one contributes" (e.g. total contributors per repo).
+ *
+ * Output rows preserve first-seen key order, so a `union` whose
+ * `sources` are listed `[react, angular, vue]` produces `[{ repo:
+ * "react", … }, { repo: "angular", … }, { repo: "vue", … }]` —
+ * downstream charts read them in that order without an extra `sort`.
+ *
+ * `groupBy` is a flat field name (same discipline as `union.tagField`);
+ * for nested keys, flatten upstream. The output row stores the key
+ * under that same field name, plus the aggregated value under `as`.
+ */
+export interface GroupBinding {
+  type: "group";
+  /** Id of another binding in `Dashboard.data` whose rows we aggregate. */
+  source: string;
+  /** Flat field name read from each input row to bucket by. */
+  groupBy: string;
+  op: GroupOp;
+  /** Flat field name where the aggregated value is written on each output row. */
+  as: string;
+}
+
+/**
+ * Concatenates rows from several other bindings into a single stream,
+ * stamping each row with a literal tag so downstream consumers can tell
+ * which source it came from. This is the multi-source primitive that
+ * unlocks "compare X across N entities in one chart" — three `rows`
+ * bindings (one per repo) joined into one binding, then read by a
+ * `barChart` with `seriesField` pointing at the tag field.
+ *
+ * Each entry in `sources` names another binding plus the literal value
+ * to stamp on every row produced by that source. The tag is written to
+ * `tagField` on each row (last-write-wins if the source row already has
+ * a key with the same name). `tagField` is a flat field name — not a
+ * dotted path — so the stamped value sits at the top level of the row,
+ * mirroring how `text` / `barChart` resolve a top-level field.
+ *
+ * Sources evaluate independently and in parallel; cycles and dangling
+ * references are caught by the aggregation engine the same way they are
+ * for `filter` / `sort` / `limit`. Each source in turn may be any
+ * binding variant — chain `rows` → `limit` per repo to get "top N
+ * contributors per repo, unioned together".
+ */
+export interface UnionBinding {
+  type: "union";
+  /** Each entry: a source binding id plus the tag to stamp on its rows. */
+  sources: { source: string; tag: string }[];
+  /** Flat field name written onto every row, holding the source's `tag`. */
+  tagField: string;
+}
+
+/**
  * Discriminated union over every binding kind. Add a variant + its
  * evaluator branch together; never both ends in separate changes.
  */
-export type Binding = RowsBinding | FilterBinding | LimitBinding | SortBinding;
+export type Binding =
+  | RowsBinding
+  | FilterBinding
+  | LimitBinding
+  | SortBinding
+  | UnionBinding
+  | GroupBinding;

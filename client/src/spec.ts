@@ -48,10 +48,12 @@ export interface TableNode {
 }
 
 /**
- * Vertical bar chart bound to a row-producing binding. One bar per row;
- * `categoryField` is a dotted path into the row used as the x-axis
- * label and `valueField` is a dotted path used as the y-axis numeric
- * value. For "top N by X", chain the binding through `sort` + `limit`.
+ * Vertical bar chart bound to a row-producing binding. `categoryField`
+ * is a dotted path into the row used as the x-axis label and
+ * `valueField` is a dotted path used as the y-axis numeric value. When
+ * `seriesField` is set, rows are grouped by its value into multiple
+ * series rendered side-by-side per category; omit it for a single
+ * series. For "top N by X", chain the binding through `sort` + `limit`.
  */
 export interface BarChartNode {
   type: "barChart";
@@ -61,6 +63,8 @@ export interface BarChartNode {
   rows: string;
   categoryField: string;
   valueField: string;
+  /** Dotted path used to group rows into named series; omit for single-series. */
+  seriesField?: string;
 }
 
 export interface RowNode {
@@ -266,7 +270,47 @@ export interface SortBinding {
   direction: SortDirection;
 }
 
-export type Binding = RowsBinding | FilterBinding | LimitBinding | SortBinding;
+/** Aggregation operator for the `group` binding. */
+export type GroupOp = "count";
+
+/**
+ * Buckets another binding's rows by a flat field name and emits one
+ * output row per distinct key, carrying the key plus the aggregated
+ * value (`as`). Output rows preserve first-seen key order so a chart
+ * downstream of a `union` reads the buckets in the union's order.
+ */
+export interface GroupBinding {
+  type: "group";
+  source: string;
+  /** Flat field name read from each input row to bucket by. */
+  groupBy: string;
+  op: GroupOp;
+  /** Flat field name where the aggregated value is written on each output row. */
+  as: string;
+}
+
+/**
+ * Concatenates rows from several other bindings into a single stream,
+ * stamping each row with a literal tag so downstream consumers can tell
+ * which source it came from — the multi-source primitive behind
+ * "compare X across N entities in one chart". Each entry in `sources`
+ * names another binding plus the tag to write under `tagField` on every
+ * row that source produces.
+ */
+export interface UnionBinding {
+  type: "union";
+  sources: { source: string; tag: string }[];
+  /** Flat field name written onto every row, holding the source's `tag`. */
+  tagField: string;
+}
+
+export type Binding =
+  | RowsBinding
+  | FilterBinding
+  | LimitBinding
+  | SortBinding
+  | UnionBinding
+  | GroupBinding;
 
 export type RefreshPolicy =
   | { kind: "manual" }

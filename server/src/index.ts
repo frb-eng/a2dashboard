@@ -2,7 +2,7 @@ import express, { type Request, type Response } from "express";
 import cors from "cors";
 import { generateDashboard, type GenerateRequest } from "./generate.js";
 import { githubCatalog } from "./catalog/github.js";
-import { assertLLMConfigured, MODEL } from "./llm.js";
+import { assertLLMConfigured, DashboardValidationError, MODEL } from "./llm.js";
 
 try {
   assertLLMConfigured();
@@ -54,6 +54,16 @@ app.post("/api/generate", async (req: Request, res: Response) => {
     res.json(out);
   } catch (err) {
     console.error("generateDashboard failed:", err);
+    if (err instanceof DashboardValidationError) {
+      // Surface the LLM-emitted intermediate JSON so the client can
+      // show it for debugging — otherwise the user only sees an opaque
+      // "param X has neither value nor stateKey" with nothing to look at.
+      res.status(502).json({
+        error: err.message,
+        rawDashboard: err.intermediate,
+      });
+      return;
+    }
     res.status(502).json({
       error: err instanceof Error ? err.message : "Dashboard generation failed.",
     });

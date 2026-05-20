@@ -8,10 +8,14 @@
  *   2. Fetch that URL and pull rows out of the response, honoring the
  *      binding's optional `rowsPath`.
  *   3. Evaluate the data-aggregation binding tree: a `rows` binding goes
- *      straight to (1)+(2); a `filter` binding recursively evaluates its
- *      source and then keeps only the rows matching its predicate.
- *      Cycles and dangling references are caught here; new operators
- *      (group / agg / join) land as new switch arms.
+ *      straight to (1)+(2); `filter` / `sort` / `limit` / `group`
+ *      recursively evaluate their single `source` (group buckets the
+ *      upstream rows by a flat field and emits one output row per
+ *      bucket with the aggregated value); `union` evaluates each of
+ *      its multiple sources in parallel, stamps a per-source tag onto
+ *      every row, and concatenates them into one stream. Cycles and
+ *      dangling references are caught here; new operators (sum / avg /
+ *      join) land as new switch arms.
  *
  * The catalog is fetched from the server once per session (the server is
  * the source of truth for URL templates and param locations) and cached.
@@ -24,9 +28,11 @@ import type {
   EndpointCall,
   EndpointParamValue,
   FilterBinding,
+  GroupBinding,
   LimitBinding,
   RowsBinding,
   SortBinding,
+  UnionBinding,
 } from "../spec";
 
 /**
@@ -109,28 +115,51 @@ export function buildUrl(
 }
 
 /**
- * Walk a binding's `source` chain to its underlying `rows` binding. Used
- * by the renderer to look up the endpoint call that ultimately backs a
- * (possibly filtered) binding — e.g. to decide whether its refresh
- * policy gates the fetch on a state slot being populated.
+ * Walk a binding tree down to every underlying `rows` binding it
+ * eventually reads from. Used by the renderer to look up the endpoint
+ * call(s) that ultimately back a (possibly filtered / sorted / limited /
+ * unioned / grouped) binding — e.g. to decide whether the fetch should
+ * be held on a required state slot being populated.
  *
- * Returns null if the chain is broken (dangling source, cycle, or
- * unknown id); the existing fetch path surfaces those as errors, so the
- * gate just lets the fetch proceed and report the real problem.
+ * Returns every `rows` binding reachable through `.source` chains and
+ * `union.sources[]`. Dangling references and cycles are skipped here;
+ * the fetch path surfaces those as errors, so the gate just lets the
+ * fetch proceed and report the real problem.
  */
-export function findRootRowsBinding(
+export function findRootRowsBindings(
   binding: Binding,
   dashboard: Dashboard,
-): RowsBinding | null {
+): RowsBinding[] {
+  const out: RowsBinding[] = [];
   const visiting = new Set<string>();
-  let cur: Binding | undefined = binding;
-  while (cur) {
-    if (cur.type === "rows") return cur;
-    if (visiting.has(cur.source)) return null;
-    visiting.add(cur.source);
-    cur = dashboard.data[cur.source];
-  }
-  return null;
+  const walk = (b: Binding | undefined): void => {
+    if (!b) return;
+    if (b.type === "rows") {
+      out.push(b);
+      return;
+    }
+    if (b.type === "union") {
+      for (const { source } of b.sources) {
+        if (visiting.has(source)) continue;
+        visiting.add(source);
+        try {
+          walk(dashboard.data[source]);
+        } finally {
+          visiting.delete(source);
+        }
+      }
+      return;
+    }
+    if (visiting.has(b.source)) return;
+    visiting.add(b.source);
+    try {
+      walk(dashboard.data[b.source]);
+    } finally {
+      visiting.delete(b.source);
+    }
+  };
+  walk(binding);
+  return out;
 }
 
 /** Read a dotted path out of a value, returning undefined if any segment is missing. */
@@ -221,6 +250,72 @@ function applyLimit(
   }
   const n = Math.floor(binding.count);
   return rows.slice(0, n);
+}
+
+function applyGroup(
+  rows: Record<string, unknown>[],
+  binding: GroupBinding,
+): Record<string, unknown>[] {
+  // Map preserves insertion order in JS, so the first time each key is
+  // seen sets its position in the output — downstream charts read the
+  // buckets in the same order the input rows arrived (e.g. a `union`'s
+  // source order).
+  switch (binding.op) {
+    case "count": {
+      const counts = new Map<unknown, number>();
+      for (const row of rows) {
+        const key = row[binding.groupBy];
+        counts.set(key, (counts.get(key) ?? 0) + 1);
+      }
+      const out: Record<string, unknown>[] = [];
+      for (const [key, count] of counts) {
+        out.push({ [binding.groupBy]: key, [binding.as]: count });
+      }
+      return out;
+    }
+  }
+}
+
+async function applyUnion(
+  binding: UnionBinding,
+  dashboard: Dashboard,
+  catalog: CatalogEntry[],
+  resolveState: StateResolver | null,
+  visiting: Set<string>,
+): Promise<Record<string, unknown>[]> {
+  // Sources evaluate in parallel; each branch gets its own copy of the
+  // visiting set so a sibling adding a shared downstream binding doesn't
+  // falsely trigger another sibling's cycle check. Real cycles still
+  // surface because the inherited ancestor chain is preserved in each
+  // copy, and the chain inside each branch grows independently.
+  const results = await Promise.all(
+    binding.sources.map(async ({ source, tag }) => {
+      const src = dashboard.data[source];
+      if (!src) {
+        throw new Error(
+          `Union binding references unknown source id "${source}".`,
+        );
+      }
+      if (visiting.has(source)) {
+        throw new Error(
+          `Binding cycle detected at union source "${source}".`,
+        );
+      }
+      const branchVisiting = new Set(visiting);
+      branchVisiting.add(source);
+      const upstream = await fetchRows(
+        src,
+        dashboard,
+        catalog,
+        resolveState,
+        branchVisiting,
+      );
+      return upstream.map((row) => ({ ...row, [binding.tagField]: tag }));
+    }),
+  );
+  const out: Record<string, unknown>[] = [];
+  for (const rows of results) out.push(...rows);
+  return out;
 }
 
 function applyFilter(
@@ -337,6 +432,34 @@ export async function fetchRows(
           visiting,
         );
         return applySort(upstream, binding);
+      } finally {
+        visiting.delete(binding.source);
+      }
+    }
+    case "union":
+      return applyUnion(binding, dashboard, catalog, resolveState, visiting);
+    case "group": {
+      const source = dashboard.data[binding.source];
+      if (!source) {
+        throw new Error(
+          `Group binding references unknown source id "${binding.source}".`,
+        );
+      }
+      if (visiting.has(binding.source)) {
+        throw new Error(
+          `Binding cycle detected at group source "${binding.source}".`,
+        );
+      }
+      visiting.add(binding.source);
+      try {
+        const upstream = await fetchRows(
+          source,
+          dashboard,
+          catalog,
+          resolveState,
+          visiting,
+        );
+        return applyGroup(upstream, binding);
       } finally {
         visiting.delete(binding.source);
       }

@@ -53,6 +53,9 @@ export type {
   LimitBinding,
   SortBinding,
   SortDirection,
+  UnionBinding,
+  GroupBinding,
+  GroupOp,
 } from "./data.js";
 export type {
   EndpointCall,
