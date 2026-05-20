@@ -1,6 +1,7 @@
 /**
  * Container that displays a generated dashboard with a toggle between
- * the live rendered view and the raw JSON spec.
+ * the live rendered view, the raw JSON spec, and an LLM-generated
+ * mermaid diagram of how the spec's primitives are wired together.
  */
 
 import { useState } from "react";
@@ -12,12 +13,14 @@ import ToggleButtonGroup from "@mui/material/ToggleButtonGroup";
 import Typography from "@mui/material/Typography";
 import DashboardIcon from "@mui/icons-material/Dashboard";
 import DataObjectIcon from "@mui/icons-material/DataObject";
+import AccountTreeIcon from "@mui/icons-material/AccountTree";
 
 import type { Dashboard } from "../spec";
 import { Renderer } from "../renderer/Renderer";
 import { DashboardJsonView } from "./DashboardJsonView";
+import { DashboardMermaidView } from "./DashboardMermaidView";
 
-type Mode = "dashboard" | "json";
+type Mode = "dashboard" | "json" | "diagram";
 
 interface DashboardViewProps {
   dashboard: Dashboard;
@@ -49,14 +52,20 @@ export function DashboardView({ dashboard, model }: DashboardViewProps) {
             <DataObjectIcon fontSize="small" sx={{ mr: 0.5 }} />
             JSON
           </ToggleButton>
+          <ToggleButton value="diagram" aria-label="Diagram">
+            <AccountTreeIcon fontSize="small" sx={{ mr: 0.5 }} />
+            Diagram
+          </ToggleButton>
         </ToggleButtonGroup>
       </Stack>
 
       <Box>
         {mode === "dashboard" ? (
           <Renderer dashboard={dashboard} />
-        ) : (
+        ) : mode === "json" ? (
           <DashboardJsonView dashboard={dashboard} />
+        ) : (
+          <DashboardMermaidView dashboard={dashboard} />
         )}
       </Box>
     </Stack>
