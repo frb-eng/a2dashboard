@@ -4,6 +4,130 @@ All notable releases of `a2dashboard` are listed here. The README's
 Milestones table is the short-form view; this file holds the full
 release notes per tag.
 
+## v0.0.4 — Charts, cross-entity comparison, and a wiring diagram (2026-05-20)
+
+Fourth tagged milestone. Dashboards stop being tables-only and start
+being charts too. The data layer learns to compose row streams across
+N entities and aggregate them per bucket. The catalog grows its first
+single-object endpoint so repo-level scalars feed the same pipeline
+as row-array endpoints. And the UI gains a third view — a Mermaid
+wiring diagram of the spec — so when something isn't behaving the
+author can see how the primitives are connected without reading the
+JSON. Same three-layer model, same prompt-to-live-dashboard loop —
+one new UI primitive, two new aggregation primitives, one new
+endpoint, one new debug view.
+
+### Highlights
+
+- **`barChart` UI primitive — the first chart-shaped renderer node.**
+  New typed variant `{ type: "barChart", id, rows, categoryField,
+  valueField, seriesField?, title? }` binds to a row binding via
+  `rows` the same way `table` does and renders bars via Highcharts.
+  `categoryField` and `valueField` are dotted paths into each row —
+  x-axis label and y-axis numeric value respectively. Optional
+  `seriesField` groups rows into named series rendered side-by-side
+  per category for cross-entity comparison; omit it for a single
+  series. No transformation lives in the chart node — for "top N by
+  X" pipe the binding through `sort` + `limit` upstream, the same way
+  a table would. Drops into a master-detail right panel unchanged:
+  same loading / error / idle ("Waiting for &lt;slot&gt;…")
+  placeholders as `table`. The LLM-facing primitive count moves from
+  ten to eleven; the prompt's blanket refusal of charts is narrowed to
+  refuse only line / pie / scatter / KPI.
+
+- **`union` binding — concatenate row streams from N entities into
+  one stream, tagged by source.** New typed variant
+  `{ type: "union", sources: { source, tag }[], tagField }`
+  concatenates rows from several other bindings, stamping each row
+  with the source's literal `tag` under the flat field name
+  `tagField`. Behind the canonical "compare N entities in one chart"
+  pipeline: one `rows` (+ optional `limit`) per entity → one `union`
+  (per-entity `tag`) → one `barChart` whose `seriesField` matches the
+  union's `tagField`. Each source may itself be any binding variant,
+  so "top 10 contributors per repo across three repos" is three
+  `limit`-on-top-of-`rows` chains feeding one `union`. Cycles and
+  dangling references are caught by the engine; a union referenced
+  from inside its own sources fails the spec.
+
+- **`group` binding (op `count`) — per-bucket aggregation, the
+  derived-value primitive.** New typed variant
+  `{ type: "group", source, groupBy, op: "count", as }` buckets a
+  source binding's rows by a flat field name and emits one row per
+  distinct key, carrying the key (under `groupBy`) plus the
+  aggregated value (under `as`). Output rows preserve first-seen key
+  order, so a `union` feeding a `group` produces buckets in the
+  union's source order — the natural "compare N entities by row
+  count" pipeline is `rows` × N → `union` (tag per entity) → `group`
+  (`groupBy` = union's `tagField`, `op` "count") → `barChart`.
+  `sum` / `avg` / `min` / `max` land later as new op values; until
+  then `count` is the only operator and the engine refuses to
+  approximate the others.
+
+- **Fourth catalogued endpoint — `github.repo` (single-object response
+  via `responseIsArray`).** `GET /repos/{owner}/{repo}` joins
+  `userRepos`, `repoIssues`, and `repoContributors` in the hardcoded
+  catalog. Unlike the existing three, its response body is a single
+  repo object, not an array of rows. A new `responseIsArray` flag on
+  each `EndpointDefinition` (defaulting to `true` for the existing
+  endpoints) tells the aggregation engine to wrap a non-array body
+  as a 1-row stream carrying every top-level field of the response,
+  so scalars like `stargazers_count` / `forks_count` /
+  `open_issues_count` / `watchers_count` feed `rows` / `union` /
+  `barChart` unchanged. The renderer never sees the difference — no
+  new binding variant, no per-endpoint shape hack — the flag in the
+  catalog is the single source of truth.
+
+- **Third view toggle — Diagram (LLM-generated mermaid wiring
+  diagram).** Alongside the rendered dashboard and the raw JSON, the
+  dashboard pane now offers a third toggle that renders a Mermaid
+  flowchart of every UI node, binding, endpoint, and state slot in
+  the spec, with arrows showing every cross-layer reference: UI →
+  binding (`rows`), binding → binding (`source` / union tag),
+  binding → endpoint, dotted writes from `textField` /
+  `setStateAndRefresh` actions / `filter` state refs, and dotted
+  param resolution from endpoint → state. The server's
+  `POST /api/mermaid` forwards the spec to the LLM with a strict JSON
+  schema and the LLM returns a typed `{ nodes, edges }` graph — not
+  raw mermaid syntax — and the server then emits mermaid from a
+  fixed shape table (rectangle / stadium / cylinder / circle, one per
+  layer) with HTML-entity-escaped labels, so the mermaid parser
+  cannot choke on a model deviation. The client caches the source per
+  `Dashboard` object reference and renders the SVG via mermaid.js, so
+  toggling away and back is instant and only a fresh spec re-fetches.
+  Strictly a debugging aid — no effect on the rendered dashboard or
+  the spec contract.
+
+### Scope (still intentionally narrow)
+
+- UI vocabulary: eleven primitives now (`table` + `barChart` + the
+  eight layout/grouping/display primitives + two interactive leaves).
+  Line / pie / scatter charts and KPI tiles still refused with a
+  textual reply.
+- Aggregation: six typed binding variants — `rows`, `filter` (op
+  `containsIgnoreCase`), `sort`, `limit`, `union`, `group` (op
+  `count`). No `join` / `time-bucket` yet, and no additional
+  `filter` ops or `group` ops beyond the ones above.
+- Endpoint catalog: four GitHub endpoints (`github.userRepos`,
+  `github.repoIssues`, `github.repoContributors`, `github.repo`).
+  Per-tenant OpenAPI ingest is still on the roadmap.
+- Actions: same two as v0.0.3 — `refresh`, `setStateAndRefresh`.
+- Refresh policy: same two — `manual`, `on-mount` — plus the derived
+  required-param fetch gate.
+- Diagram view is generated on demand by the LLM. It is not part of
+  the dashboard spec contract; no client-side conversion path exists
+  and none is planned.
+
+### Known gaps to address next
+
+- More chart shapes (line / pie / scatter) for non-bar visualisations.
+- More `group` operators (`sum`, `avg`, `min`, `max`) so per-bucket
+  totals and averages stop being out of reach.
+- More `filter` operators (`equals`, `gt`, `in`, range).
+- KPI tile primitive so single-scalar summaries don't need a 1-row
+  table.
+- User-registered endpoints via OpenAPI ingest, so the catalog stops
+  being hardcoded.
+
 ## v0.0.3 — Master-detail and top-N pipelines (2026-05-19)
 
 Third tagged milestone. Dashboards stop being one panel that you read
